@@ -170,22 +170,32 @@ function tileWidth(t: Tile): number {
   return t.label.length * 5.7 + t.value.length * 7 + 22
 }
 
-/** A strip of one-line stat chips: a dim label, then its value. */
-export function tilesSvg(tiles: readonly Tile[], p: Palette): { svg: string; width: number } {
-  const h = TILE_H
-  const gap = 6
+const TILE_GAP = 6
+
+/** How wide a strip of these chips draws. */
+export function stripWidth(tiles: readonly Tile[]): number {
+  return Math.max(1, tiles.reduce((sum, t) => sum + Math.round(tileWidth(t)) + TILE_GAP, 0) - TILE_GAP)
+}
+
+/**
+ * A strip of one-line stat chips: a dim label, then its value. `slot` widens the drawing past its chips
+ * (so the row never shifts when they change), `top` drops them to sit level with the keys' faces.
+ */
+export function tilesSvg(tiles: readonly Tile[], p: Palette, o: { slot?: number; top?: number; height?: number } = {}): { svg: string; width: number } {
+  const top = o.top ?? 0
+  const h = o.height ?? TILE_H
   let x = 0
   const parts: string[] = []
   for (const t of tiles) {
     const w = Math.round(tileWidth(t))
     const color = t.tone === 'calm' ? p.calm : t.tone === 'hot' ? p.hot : p.value
     parts.push(
-      `<rect x="${x}" width="${w}" height="${h}" rx="7" fill="${p.tile}"/>`,
-      `<text x="${x + 10}" y="17" font-size="12" font-family="${SANS}"><tspan fill="${p.label}">${xml(t.label)}</tspan><tspan dx="6" font-weight="600" fill="${color}">${xml(t.value)}</tspan></text>`,
+      `<rect x="${x}" y="${top}" width="${w}" height="${TILE_H}" rx="7" fill="${p.tile}"/>`,
+      `<text x="${x + 10}" y="${top + 17}" font-size="12" font-family="${SANS}"><tspan fill="${p.label}">${xml(t.label)}</tspan><tspan dx="6" font-weight="600" fill="${color}">${xml(t.value)}</tspan></text>`,
     )
-    x += w + gap
+    x += w + TILE_GAP
   }
-  const width = Math.max(1, x - gap)
+  const width = Math.max(stripWidth(tiles), Math.round(o.slot ?? 0))
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">${parts.join('')}</svg>`, width }
 }
 
@@ -231,31 +241,89 @@ export function gaugeText(percent: number | null, cells: number): string {
   return out
 }
 
-export type KeyArt = { glyph?: string; glyphColor?: string; label: string; fg: string; bg: string; edge: string; hover?: boolean }
+export type KeyArt = {
+  glyph?: string; glyphColor?: string; label: string; fg: string; bg: string; edge: string; hover?: boolean
+  /** Size the key for this label instead, so a key whose label changes (On, Off) never changes size. */
+  sizeAs?: string
+  /** Draw a flame in place of a glyph: burning and throwing sparks, or still and grey. */
+  flame?: 'on' | 'off'
+}
 
-/** The height of a key, its glow included: a little taller than a chip so the glow has room. */
+/** The height of a key's face, its glow included: a little taller than a chip so the glow has room. */
 export const KEY_H = 30
+/** Headroom above every key's face, where sparks fly and the mascot jumps out of its frame. */
+export const KEY_TOP = 12
+/** The height of every key's image: the headroom, then the face. */
+export const KEY_CANVAS_H = KEY_TOP + KEY_H
 
-/** A pressable key as an image: a rounded fill, a crisp outline and a soft glow of the same colour. */
-export function keySvg(k: KeyArt): { svg: string; width: number } {
-  const glyphW = k.glyph ? (k.glyph.codePointAt(0)! >= 0x1f000 ? 16 : 11) + 6 : 0
-  const textW = Math.round(k.label.length * 7.6)
-  const w = 3 + 8 + glyphW + textW + 8 + 3
-  const h = KEY_H
+const textWidth = (label: string) => Math.round(label.length * 7.6)
+
+/** A flame standing on (0, 0): a tall tongue leaning right and a short one on the left, and its bright core. */
+const FLAME_OUTER = 'M1 -15 C1.5 -11 6 -9 6.5 -5 C7 -1 4 1.5 0 1.5 C-4.5 1.5 -6.5 -1.5 -6 -4.8 C-5.7 -7.2 -4.2 -8.2 -3.6 -10.6 C-2.2 -9 -1.6 -7.6 -1.8 -6.2 C0.4 -8.4 1.6 -11.6 1 -15 Z'
+const FLAME_CORE = 'M0.6 -8 C1.8 -5.8 3.2 -4.2 3.2 -2.2 C3.2 -0.2 1.7 0.8 0 0.8 C-1.7 0.8 -3.2 -0.2 -3.2 -2 C-3.2 -3.8 -1.4 -4.6 -0.8 -6.2 C-0.2 -5.4 0.2 -4.8 0.2 -4.2 C0.9 -5.2 1 -6.6 0.6 -8 Z'
+const FLAME_W = 13
+
+/** The flame: lit, it flickers red through amber to gold and throws sparks up out of the key; unlit, it is grey. */
+function flameSvg(state: 'on' | 'off', cx: number, base: number): string {
+  if (state === 'off') {
+    return `<g transform="translate(${cx} ${base})"><path d="${FLAME_OUTER}" fill="#6b6a65"/><path d="${FLAME_CORE}" fill="#8f8d86"/></g>`
+  }
+  const flame = [
+    `<g transform="translate(${cx} ${base})"><g>`,
+    `<animateTransform attributeName="transform" type="scale" values="1 1;0.92 1.07;1.05 0.96;0.97 1.04;1 1" dur="0.7s" repeatCount="indefinite"/>`,
+    `<path d="${FLAME_OUTER}" fill="#ff3b2f"><animate attributeName="fill" values="#ff3b2f;#ff6a1a;#ffb21e;#ffc93c;#ff8a1e;#ff3b2f" dur="1.6s" repeatCount="indefinite"/></path>`,
+    `<path d="${FLAME_CORE}" fill="#ffc93c"><animate attributeName="fill" values="#ffc93c;#fff1a8;#ffe08a;#ffc93c" dur="0.9s" repeatCount="indefinite"/></path>`,
+    `</g></g>`,
+  ].join('')
+  // Each spark leaves the flame's tip, drifts sideways and fades out above the key's top edge.
+  const tip = base - 14
+  const sparks = [
+    { dx: -5, r: 1.9, dur: 1.5, begin: 0, fill: '#ffc93c' },
+    { dx: 6, r: 1.6, dur: 1.8, begin: 0.3, fill: '#ff8a1e' },
+    { dx: -2, r: 1.7, dur: 1.3, begin: 0.6, fill: '#fff1a8' },
+    { dx: 9, r: 2, dur: 2, begin: 0.9, fill: '#ffb21e' },
+    { dx: -8, r: 1.5, dur: 1.7, begin: 1.2, fill: '#ffc93c' },
+    { dx: 3, r: 1.8, dur: 1.6, begin: 1.5, fill: '#ff6a1a' },
+  ].map(s => [
+    `<circle class="spark" cx="${cx}" cy="${tip}" r="${s.r}" fill="${s.fill}" opacity="0">`,
+    `<animate attributeName="cy" values="${tip};${Math.round((tip + 1) / 2)};1" dur="${s.dur}s" begin="${s.begin}s" repeatCount="indefinite"/>`,
+    `<animate attributeName="cx" values="${cx};${cx + s.dx / 2};${cx + s.dx}" dur="${s.dur}s" begin="${s.begin}s" repeatCount="indefinite"/>`,
+    `<animate attributeName="opacity" values="0;1;0.9;0" keyTimes="0;0.15;0.6;1" dur="${s.dur}s" begin="${s.begin}s" repeatCount="indefinite"/>`,
+    `</circle>`,
+  ].join(''))
+  return flame + sparks.join('')
+}
+
+/**
+ * A pressable key as an image: a rounded fill, a crisp outline and a soft glow of the same colour, below
+ * `KEY_TOP` of headroom. `isAnimated` says the drawing moves, so it needs an interactive Svg to play.
+ */
+export function keySvg(k: KeyArt): { svg: string; width: number; isAnimated: boolean } {
+  const markW = k.flame ? FLAME_W + 6 : k.glyph ? (k.glyph.codePointAt(0)! >= 0x1f000 ? 16 : 11) + 6 : 0
+  const w = 3 + 8 + markW + textWidth(k.sizeAs ?? k.label) + 8 + 3
+  const h = KEY_CANVAS_H
+  const top = KEY_TOP
+  const lit = k.flame === 'on'
   const glow = k.hover ? 0.95 : 0.55
+  // A lit key's glow breathes; under the pointer it holds bright.
+  const breathe = lit && !k.hover ? `<animate attributeName="opacity" values="0.45;0.95;0.45" dur="2.4s" repeatCount="indefinite"/>` : ''
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
     `<defs><filter id="g" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
-    `<rect x="3" y="3" width="${w - 6}" height="${h - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)"/>`,
-    `<rect x="3.5" y="3.5" width="${w - 7}" height="${h - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2"/>`,
+    `<rect x="3" y="${top + 3}" width="${w - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)">${breathe}</rect>`,
+    `<rect x="3.5" y="${top + 3.5}" width="${w - 7}" height="${KEY_H - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2"/>`,
   ]
-  let x = 3 + 8
-  if (k.glyph) {
-    parts.push(`<text x="${x}" y="19.5" font-size="12" fill="${k.glyphColor ?? k.fg}" font-family="Segoe UI Symbol, Segoe UI Emoji, sans-serif">${xml(k.glyph)}</text>`)
-    x += glyphW
+  // The mark and label sit centred, so a shorter label than `sizeAs` leaves even space both sides.
+  let x = Math.round((w - markW - textWidth(k.label)) / 2)
+  if (k.flame) {
+    parts.push(flameSvg(k.flame, x + FLAME_W / 2, top + 21))
+    x += markW
+  } else if (k.glyph) {
+    parts.push(`<text x="${x}" y="${top + 19.5}" font-size="12" fill="${k.glyphColor ?? k.fg}" font-family="Segoe UI Symbol, Segoe UI Emoji, sans-serif">${xml(k.glyph)}</text>`)
+    x += markW
   }
-  parts.push(`<text x="${x}" y="19.5" font-size="13" font-weight="600" fill="${k.fg}" font-family="${SANS}">${xml(k.label)}</text>`, `</svg>`)
-  return { svg: parts.join(''), width: w }
+  parts.push(`<text x="${x}" y="${top + 19.5}" font-size="13" font-weight="600" fill="${k.fg}" font-family="${SANS}">${xml(k.label)}</text>`, `</svg>`)
+  return { svg: parts.join(''), width: w, isAnimated: lit }
 }
 
 // ---- The crew key: a pixel mascot that loops through 12 poses --------------------------------
@@ -308,13 +376,20 @@ export const CREW_POSES: ReadonlyArray<Px[]> = [
   pose({ claws: 'wave' }),
 ]
 
-/** A square key holding the mascot, its 12 poses swapped every 0.2s in a loop (SMIL, no script). */
+/** How far above the top of its image the mascot's grid starts: its head rides above the frame's rim. */
+const CREW_OY = 4
+
+/**
+ * The mascot key: its 12 poses swapped every 0.2s in a loop (SMIL, no script). The mascot is bigger than
+ * the frame, on purpose: standing, its head and shoulders show over the rim, and it jumps clear of the
+ * top into the headroom. Side to side it always keeps clear of the frame's edges.
+ */
 export function crewKeySvg(k: { edge: string; bg: string; hover?: boolean; running?: number }): { svg: string; width: number } {
-  const h = KEY_H
-  const w = KEY_H + 10
-  const cell = 2
+  const h = KEY_CANVAS_H
+  const cell = 3
+  const w = 12 * cell + 2 * 4 + 6
   const ox = Math.round((w - 12 * cell) / 2)
-  const oy = Math.round((h - 9 * cell) / 2)
+  const oy = CREW_OY
   const n = CREW_POSES.length
   const dur = (n * 0.2).toFixed(1)
   const keyTimes = Array.from({ length: n }, (_, i) => (i / n).toFixed(4)).join(';')
@@ -324,15 +399,16 @@ export function crewKeySvg(k: { edge: string; bg: string; hover?: boolean; runni
     return `<g opacity="${i === 0 ? 1 : 0}"><animate attributeName="opacity" values="${values}" keyTimes="${keyTimes}" dur="${dur}s" calcMode="discrete" repeatCount="indefinite"/>${rects}</g>`
   })
   const glow = k.hover ? 0.95 : 0.55
+  const top = KEY_TOP
   const badge = k.running && k.running > 0
-    ? `<circle cx="${w - 8}" cy="8" r="6" fill="#ff4d5e"/><text x="${w - 8}" y="11" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff" font-family="${SANS}">${Math.min(9, k.running)}</text>`
+    ? `<circle cx="${w - 8}" cy="${top + 8}" r="6" fill="#ff4d5e"/><text x="${w - 8}" y="${top + 11}" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff" font-family="${SANS}">${Math.min(9, k.running)}</text>`
     : ''
   return {
     svg: [
       `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`,
       `<defs><filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
-      `<rect x="3" y="3" width="${w - 6}" height="${h - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)" shape-rendering="auto"/>`,
-      `<rect x="3.5" y="3.5" width="${w - 7}" height="${h - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2" shape-rendering="auto"/>`,
+      `<rect x="3" y="${top + 3}" width="${w - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)" shape-rendering="auto"/>`,
+      `<rect x="3.5" y="${top + 3.5}" width="${w - 7}" height="${KEY_H - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2" shape-rendering="auto"/>`,
       ...frames,
       badge,
       `</svg>`,

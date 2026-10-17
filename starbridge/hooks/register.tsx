@@ -12,10 +12,13 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  crewKeySvg, DARK, extractResume, GAUGE_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
-  LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, tilesSvg, TTL_MS,
+  crewKeySvg, DARK, extractResume, GAUGE_H, KEY_CANVAS_H, KEY_TOP, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, stripWidth, tilesSvg, TTL_MS,
 } from './logic'
 import type { Tile } from './logic'
+
+/** Roughly the room the desktop leaves between two items of a row, in CSS pixels. */
+const ROW_GAP_PX = 14
 
 const IDLE_RUN: SessionRun = { mode: null, turns: 0, startedAt: 0 }
 const FRESH: View = {
@@ -262,6 +265,24 @@ function tilesOf(v: View, now: number): Tile[] {
   return tiles
 }
 
+/** Drops chips from the end until the strip fits `budget` pixels; the first chip always stays. */
+function fitTiles(tiles: Tile[], budget: number): Tile[] {
+  const out = [...tiles]
+  while (out.length > 1 && stripWidth(out) > budget) out.pop()
+  return out
+}
+
+/**
+ * The chips to draw and the room they hold. The room is the wider of what Keep warm on and Keep warm off
+ * would show, so a click on the key changes the words in the chips and never moves the row.
+ */
+function stripOf(v: View, now: number, budget: number): { tiles: Tile[]; slot: number } {
+  const asOn: View = { ...v, warmOn: true, nextPingAt: v.warmOn ? v.nextPingAt : now + PING_EVERY_MS }
+  const asOff: View = { ...v, warmOn: false }
+  const slot = Math.min(budget, Math.max(stripWidth(fitTiles(tilesOf(asOn, now), budget)), stripWidth(fitTiles(tilesOf(asOff, now), budget))))
+  return { tiles: fitTiles(tilesOf(v, now), budget), slot }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -487,43 +508,66 @@ export const register: Register = on => {
         // runs SMIL), with the same invisible click area laid over it.
         const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', hover: hovered === 'crew' })
         const crewCells = Math.ceil(crewArt.width / 8)
+        // Every key image is KEY_CANVAS_H tall, its face below KEY_TOP of headroom; the invisible click
+        // area takes two rows so it covers the whole face. Keys never shrink: when the row runs short,
+        // chips are dropped instead (stripOf).
         const crewKey = flat ? (
           <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
         ) : (
-          <Box key="starbridge-crew-key" position="relative">
-            <Svg source={crewArt.svg} alt="Agents panel" width={crewArt.width} height={KEY_H} isInteractive />
+          <Box key="starbridge-crew-key" position="relative" flexShrink={0}>
+            <Svg source={crewArt.svg} alt="Agents panel" width={crewArt.width} height={KEY_CANVAS_H} isInteractive />
             <Box position="absolute" top={0} left={0}>
-              <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width={crewCells} height={1} />
+              <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width={crewCells} height={2} />
             </Box>
           </Box>
         )
+        // Keep warm draws a flame of its own, and is sized for its longer label so On and Off match.
+        const artOf = (spec: DeckSpec) => {
+          const isWarm = spec.action === 'warm'
+          return keySvg({
+            glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg,
+            edge: hovered === spec.action ? spec.hoverEdge ?? spec.edge! : spec.edge!, hover: hovered === spec.action,
+            ...(isWarm ? { sizeAs: 'Off', flame: v.warmOn ? 'on' as const : 'off' as const } : {}),
+          })
+        }
         const deckKey = (spec: DeckSpec) => {
           if (flat || !spec.edge) {
             return <Client key={spec.key} module="./deck-button.ts" props={spec} width={widthOf(spec)} height={heightOf(spec)} />
           }
-          const art = keySvg({ glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg, edge: hovered === spec.action ? spec.hoverEdge ?? spec.edge : spec.edge, hover: hovered === spec.action })
+          const art = artOf(spec)
           const cells = Math.ceil(art.width / 8)
+          // Keep warm is always a frame, lit or not, so switching it never swaps an image for a frame.
           return (
-            <Box key={`${spec.key}-key`} position="relative">
-              <Svg source={art.svg} alt={spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label} width={art.width} height={KEY_H} />
+            <Box key={`${spec.key}-key`} position="relative" flexShrink={0}>
+              <Svg source={art.svg} alt={spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label} width={art.width} height={KEY_CANVAS_H} isInteractive={spec.action === 'warm' || art.isAnimated} />
               <Box position="absolute" top={0} left={0}>
-                <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width={cells} height={1} />
+                <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width={cells} height={2} />
               </Box>
             </Box>
           )
         }
         const width = Math.max(240, Math.min(1400, cols * 8 - 24))
-        const strip = tiles.length > 0 ? tilesSvg(tiles, p) : null
+        const keysPx = (flat ? 0 : crewArt.width) + specs.reduce((sum, s) => sum + (flat || !s.edge ? widthOf(s) * 8 : artOf(s).width), 0)
+        const budget = width - keysPx - ROW_GAP_PX * (specs.length + 2) - (busy ? busy.length * 7 + 40 : 0)
+        const { tiles: shown, slot } = stripOf(v, now, budget)
+        const strip = shown.length > 0 ? tilesSvg(shown, p, flat ? { slot } : { slot, top: KEY_TOP + 2, height: KEY_CANVAS_H }) : null
         return (
           <Box flexDirection="column" gap={1}>
-            <Svg source={gaugeSvg(v.percent, width, p)} alt={`Context ${v.percent ?? 0}% full`} width={width} height={GAUGE_H} />
-            <Box flexDirection="row" alignItems="center" gap={1}>
-              {strip ? <Svg source={strip.svg} alt={tiles.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={TILE_H} /> : null}
-              <Box flexGrow={1} />
-              {running}
-              {cancelRun}
-              {crewKey}
-              {specs.map(deckKey)}
+            {/* No gap here: the keys' headroom is the space between the gauge and the row. */}
+            <Box flexDirection="column">
+              <Svg source={gaugeSvg(v.percent, width, p)} alt={`Context ${v.percent ?? 0}% full`} width={width} height={GAUGE_H} />
+              <Box flexDirection="row" alignItems="center" gap={1}>
+                {strip ? (
+                  <Box flexShrink={1}>
+                    <Svg source={strip.svg} alt={shown.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={flat ? TILE_H : KEY_CANVAS_H} />
+                  </Box>
+                ) : null}
+                <Box flexGrow={1} />
+                {running}
+                {cancelRun}
+                {crewKey}
+                {specs.map(deckKey)}
+              </Box>
             </Box>
             {hold ? <Svg source={holdCardSvg(width, hold, p)} alt={`Message on hold. Send now ${fmtUsd(hold.coldUsd)}, a warm turn ${fmtUsd(hold.warmUsd)}.`} width={width} height={132} /> : null}
             {hold ? (

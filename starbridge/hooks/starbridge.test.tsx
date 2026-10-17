@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import DeckButton from './deck-button'
-import { coldUsd, DARK, extractResume, gaugeSvg, gaugeText, holdCardSvg, isRunLive, priceOf, RUN_MAX_MS, warmUsd } from './logic'
+import { coldUsd, crewKeySvg, DARK, extractResume, gaugeSvg, gaugeText, holdCardSvg, isRunLive, KEY_TOP, keySvg, priceOf, RUN_MAX_MS, warmUsd } from './logic'
 
 const PLUGIN = 'starbridge'
 
@@ -278,4 +278,55 @@ test('the mascot key animates 12 poses and opens the agents panel when clicked',
   await click(ui as never, 'starbridge-crew')
   expect(w.commands).toEqual(['agents-info'])
   await ui.unmount()
+})
+
+test('turning Keep warm on or off moves nothing: every key and the chip strip keep their size', async ($, on) => {
+  const w = world(on, { tokens: 120000 })
+  await start($)
+  await $.turn.complete(turn())
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: { ...band, bodyColumns: 125 } })
+  const sizes = async () => (await ui.findAll({ type: 'Svg' })).filter(svg => !String(svg.props.alt).startsWith('Context')).map(svg => `${svg.props.width}x${svg.props.height}`)
+  const off = await sizes()
+  await click(ui as never, 'starbridge-warm')
+  await w.clock.settle()
+  expect(labelOf(await ui.find({ key: 'starbridge-warm' }))).toBe('🔥 On')
+  expect(await sizes()).toEqual(off)
+  // The keys never give way when the row runs short: the chips do.
+  for (const key of ['starbridge-crew-key', 'starbridge-warm-key', 'starbridge-handover-key', 'starbridge-end-key']) {
+    expect((await ui.find({ key }))?.props.flexShrink).toBe(0)
+  }
+  await ui.unmount()
+})
+
+test('Keep warm on: the flame burns red to gold and throws sparks above the key; off: a still grey flame', () => {
+  const lit = keySvg({ label: 'On', sizeAs: 'Off', flame: 'on', fg: '#ffc93c', bg: '#2b2208', edge: '#ffc93c' })
+  const out = keySvg({ label: 'Off', sizeAs: 'Off', flame: 'off', fg: '#c9c7bf', bg: '#222220', edge: '#5d5c57' })
+  expect(lit.width).toBe(out.width)
+  expect(lit.svg).toMatch(/<animate attributeName="fill" values="[^"]*#ff3b2f[^"]*#ffc93c/)
+  const sparks = [...lit.svg.matchAll(/<circle class="spark"[^>]*>(.*?)<\/circle>/g)]
+  expect(sparks.length >= 4).toBe(true)
+  // Each spark rises from inside the key to above its top edge.
+  for (const s of sparks) {
+    const ys = (s[1].match(/attributeName="cy" values="([^"]+)"/)?.[1] ?? '').split(';').map(Number)
+    expect(ys[0] > KEY_TOP).toBe(true)
+    expect(ys.at(-1)! < KEY_TOP).toBe(true)
+  }
+  expect(out.svg).not.toContain('<animate')
+  expect(out.svg).not.toContain('spark')
+})
+
+test('the mascot is drawn bigger than its frame allows: standing it clears the sides, jumping it leaves the top', () => {
+  const art = crewKeySvg({ edge: '#d97757', bg: '#1f1a17' })
+  const frame = art.svg.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="7.5"/)!.slice(1).map(Number)
+  const [fx, fy, fw] = frame
+  const poses = [...art.svg.matchAll(/<g opacity="[01]">(.*?)<\/g>/g)].map(g => [...g[1].matchAll(/<rect x="(\d+)" y="(-?\d+)" width="(\d+)"/g)].map(m => m.slice(1).map(Number)))
+  expect(poses.length).toBe(12)
+  expect(poses[0][0][2]).toBe(3)
+  for (const px of poses) {
+    for (const [x, , cw] of px) {
+      expect(x >= fx + 3).toBe(true)
+      expect(x + cw <= fx + fw - 3).toBe(true)
+    }
+  }
+  expect(poses.some(px => px.some(([, y]) => y < fy - 4))).toBe(true)
 })
