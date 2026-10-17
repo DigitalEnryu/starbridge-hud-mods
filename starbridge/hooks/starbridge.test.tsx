@@ -298,6 +298,34 @@ test('turning Keep warm on or off moves nothing: every key and the chip strip ke
   await ui.unmount()
 })
 
+test('a narrow row shortens the chips rather than dropping them, so Keep warm on and off both keep their chips', async ($, on) => {
+  const w = world(on, { tokens: 120000 })
+  await start($)
+  await $.turn.complete(turn())
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: { ...band, bodyColumns: 92 } })
+  const strip = async () => (await ui.findAll({ type: 'Svg' })).find(svg => String(svg.props.alt).startsWith('This session'))!
+  const off = await strip()
+  expect(String(off.props.alt)).toMatch(/Next turn, warm .*If it goes cold/)
+  expect(String(off.props.source)).toContain('>If cold<')
+  await click(ui as never, 'starbridge-warm')
+  await w.clock.settle()
+  const lit = await strip()
+  expect(String(lit.props.alt)).toMatch(/Kept warm 0 times/)
+  expect(lit.props.width).toBe(off.props.width)
+  await ui.unmount()
+})
+
+test('each key\'s click area fills the whole key, so a click anywhere on it lands', async ($, on) => {
+  world(on, { tokens: 120000 })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  for (const key of ['starbridge-crew', 'starbridge-warm', 'starbridge-handover', 'starbridge-end']) {
+    const el = await ui.find({ key })
+    expect([el?.props.width, el?.props.height]).toEqual(['100%', '100%'])
+  }
+  await ui.unmount()
+})
+
 test('Keep warm on: the flame burns red to gold and throws sparks above the key; off: a still grey flame', () => {
   const lit = keySvg({ label: 'On', sizeAs: 'Off', flame: 'on', fg: '#ffc93c', bg: '#2b2208', edge: '#ffc93c' })
   const out = keySvg({ label: 'Off', sizeAs: 'Off', flame: 'off', fg: '#c9c7bf', bg: '#222220', edge: '#5d5c57' })

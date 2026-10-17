@@ -13,7 +13,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { SessionRun, View } from '../types'
 import {
   crewKeySvg, DARK, extractResume, GAUGE_H, KEY_CANVAS_H, KEY_TOP, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
-  LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, stripWidth, tilesSvg, TTL_MS,
+  LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, shortened, stripWidth, tilesSvg, TTL_MS,
 } from './logic'
 import type { Tile } from './logic'
 
@@ -251,17 +251,32 @@ async function readTheme($: EngineInterface): Promise<void> {
 
 function tilesOf(v: View, now: number): Tile[] {
   const tiles: Tile[] = []
-  if (v.sessionUsd !== null) tiles.push({ label: 'This session', value: `≈${fmtUsd(v.sessionUsd)}` })
+  if (v.sessionUsd !== null) {
+    const usd = `≈${fmtUsd(v.sessionUsd)}`
+    tiles.push({ label: 'This session', value: usd, short: { label: 'Session', value: usd } })
+  }
   const price = priceOf(v.model)
   if (v.warmOn) {
-    const next = v.nextPingAt > now ? ` · next ${fmtDuration(v.nextPingAt - now)}` : ''
-    tiles.push({ label: `Kept warm ${v.pings} time${v.pings === 1 ? '' : 's'}`, value: `≈${fmtUsd(v.pingUsd)}${next}`, tone: 'hot' })
-    if (v.saves > 0) tiles.push({ label: 'Saved vs going cold', value: `≈${fmtUsd(Math.max(0, v.savedUsd - v.pingUsd))}`, tone: 'calm' })
+    const left = v.nextPingAt > now ? fmtDuration(v.nextPingAt - now) : ''
+    const spent = `≈${fmtUsd(v.pingUsd)}`
+    tiles.push({
+      label: `Kept warm ${v.pings} time${v.pings === 1 ? '' : 's'}`, value: `${spent}${left ? ` · next ${left}` : ''}`, tone: 'hot',
+      short: { label: `Warm ×${v.pings}`, value: `${spent}${left ? ` · ${left}` : ''}` },
+    })
+    if (v.saves > 0) {
+      const saved = `≈${fmtUsd(Math.max(0, v.savedUsd - v.pingUsd))}`
+      tiles.push({ label: 'Saved vs going cold', value: saved, tone: 'calm', short: { label: 'Saved', value: saved } })
+    }
   } else if (price && v.tokens) {
-    tiles.push({ label: 'Next turn, warm', value: fmtUsd(warmUsd(v.tokens, price)), tone: 'calm' })
-    tiles.push({ label: 'If it goes cold', value: fmtUsd(coldUsd(v.tokens, price)), tone: 'hot' })
+    const warm = fmtUsd(warmUsd(v.tokens, price))
+    const cold = fmtUsd(coldUsd(v.tokens, price))
+    tiles.push({ label: 'Next turn, warm', value: warm, tone: 'calm', short: { label: 'Warm', value: warm } })
+    tiles.push({ label: 'If it goes cold', value: cold, tone: 'hot', short: { label: 'If cold', value: cold } })
   }
-  if (v.stopped) tiles.push({ label: 'Keep warm stopped', value: v.stopped.length > 34 ? `${v.stopped.slice(0, 33)}…` : v.stopped })
+  if (v.stopped) {
+    const why = (n: number) => (v.stopped!.length > n ? `${v.stopped!.slice(0, n - 1)}…` : v.stopped!)
+    tiles.push({ label: 'Keep warm stopped', value: why(34), short: { label: 'Warm off', value: why(18) } })
+  }
   return tiles
 }
 
@@ -273,14 +288,21 @@ function fitTiles(tiles: Tile[], budget: number): Tile[] {
 }
 
 /**
- * The chips to draw and the room they hold. The room is the wider of what Keep warm on and Keep warm off
- * would show, so a click on the key changes the words in the chips and never moves the row.
+ * The chips to draw (`tiles`, perhaps in short words), the same chips in full words (`full`, for the
+ * alt text) and the room they hold. The room is the wider of what Keep warm on and Keep warm off would
+ * show, so a click on the key changes the words in the chips and never moves the row. When either
+ * would overflow, both switch to short words, so toggling never trades one chip for another; only
+ * a row too narrow even for those drops chips from the end.
  */
-function stripOf(v: View, now: number, budget: number): { tiles: Tile[]; slot: number } {
+function stripOf(v: View, now: number, budget: number): { tiles: Tile[]; full: Tile[]; slot: number } {
   const asOn: View = { ...v, warmOn: true, nextPingAt: v.warmOn ? v.nextPingAt : now + PING_EVERY_MS }
   const asOff: View = { ...v, warmOn: false }
-  const slot = Math.min(budget, Math.max(stripWidth(fitTiles(tilesOf(asOn, now), budget)), stripWidth(fitTiles(tilesOf(asOff, now), budget))))
-  return { tiles: fitTiles(tilesOf(v, now), budget), slot }
+  const isShort = [asOn, asOff].some(x => stripWidth(tilesOf(x, now)) > budget)
+  const words = (tiles: Tile[]) => (isShort ? tiles.map(shortened) : tiles)
+  const slot = Math.min(budget, Math.max(...[asOn, asOff].map(x => stripWidth(fitTiles(words(tilesOf(x, now)), budget)))))
+  const full = tilesOf(v, now)
+  const tiles = fitTiles(words(full), budget)
+  return { tiles, full: full.slice(0, tiles.length), slot }
 }
 
 export const register: Register = on => {
@@ -509,15 +531,15 @@ export const register: Register = on => {
         const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', hover: hovered === 'crew' })
         const crewCells = Math.ceil(crewArt.width / 8)
         // Every key image is KEY_CANVAS_H tall, its face below KEY_TOP of headroom; the invisible click
-        // area takes two rows so it covers the whole face. Keys never shrink: when the row runs short,
-        // chips are dropped instead (stripOf).
+        // area is stretched over the whole image (all four offsets, 100% each way), so it sits exactly on
+        // the key whatever a cell measures. Keys never shrink: when the row runs short, chips give way (stripOf).
         const crewKey = flat ? (
           <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
         ) : (
           <Box key="starbridge-crew-key" position="relative" flexShrink={0}>
             <Svg source={crewArt.svg} alt="Agents panel" width={crewArt.width} height={KEY_CANVAS_H} isInteractive />
-            <Box position="absolute" top={0} left={0}>
-              <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width={crewCells} height={2} />
+            <Box position="absolute" top={0} bottom={0} left={0} right={0}>
+              <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width="100%" height="100%" />
             </Box>
           </Box>
         )
@@ -540,8 +562,8 @@ export const register: Register = on => {
           return (
             <Box key={`${spec.key}-key`} position="relative" flexShrink={0}>
               <Svg source={art.svg} alt={spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label} width={art.width} height={KEY_CANVAS_H} isInteractive={spec.action === 'warm' || art.isAnimated} />
-              <Box position="absolute" top={0} left={0}>
-                <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width={cells} height={2} />
+              <Box position="absolute" top={0} bottom={0} left={0} right={0}>
+                <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width="100%" height="100%" />
               </Box>
             </Box>
           )
@@ -549,7 +571,7 @@ export const register: Register = on => {
         const width = Math.max(240, Math.min(1400, cols * 8 - 24))
         const keysPx = (flat ? 0 : crewArt.width) + specs.reduce((sum, s) => sum + (flat || !s.edge ? widthOf(s) * 8 : artOf(s).width), 0)
         const budget = width - keysPx - ROW_GAP_PX * (specs.length + 2) - (busy ? busy.length * 7 + 40 : 0)
-        const { tiles: shown, slot } = stripOf(v, now, budget)
+        const { tiles: shown, full, slot } = stripOf(v, now, budget)
         const strip = shown.length > 0 ? tilesSvg(shown, p, flat ? { slot } : { slot, top: KEY_TOP + 2, height: KEY_CANVAS_H }) : null
         return (
           <Box flexDirection="column" gap={1}>
@@ -559,7 +581,7 @@ export const register: Register = on => {
               <Box flexDirection="row" alignItems="center" gap={1}>
                 {strip ? (
                   <Box flexShrink={1}>
-                    <Svg source={strip.svg} alt={shown.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={flat ? TILE_H : KEY_CANVAS_H} />
+                    <Svg source={strip.svg} alt={full.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={flat ? TILE_H : KEY_CANVAS_H} />
                   </Box>
                 ) : null}
                 <Box flexGrow={1} />

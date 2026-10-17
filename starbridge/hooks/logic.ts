@@ -160,7 +160,13 @@ export function gaugeSvg(percent: number | null, width: number, p: Palette): str
   ].join('')
 }
 
-export type Tile = { label: string; value: string; tone?: 'calm' | 'hot' }
+/** A stat chip. `short` is how it reads when the row is too narrow for the full words. */
+export type Tile = { label: string; value: string; tone?: 'calm' | 'hot'; short?: { label: string; value: string } }
+
+/** The chip in its short words, where it has any. */
+export function shortened(t: Tile): Tile {
+  return t.short ? { ...t, ...t.short, short: undefined } : t
+}
 
 /** The height of a tile: one line, level with the desktop's native buttons. */
 export const TILE_H = 26
@@ -376,8 +382,11 @@ export const CREW_POSES: ReadonlyArray<Px[]> = [
   pose({ claws: 'wave' }),
 ]
 
-/** How far above the top of its image the mascot's grid starts: its head rides above the frame's rim. */
-const CREW_OY = 4
+/**
+ * Where the mascot's grid starts, from the top of its image. Standing, its feet land a third of the way up
+ * from the frame's floor and its head rides just over the rim; jumps clear the rim.
+ */
+const CREW_OY = 7
 
 /**
  * The mascot key: its 12 poses swapped every 0.2s in a loop (SMIL, no script). The mascot is bigger than
