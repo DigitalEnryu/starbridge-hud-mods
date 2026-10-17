@@ -115,12 +115,12 @@ export type Palette = {
 
 export const DARK: Palette = {
   track: '#1b1b1a', edge: '#3a3936', tile: '#30302e', label: '#8f8d86', value: '#e8e6df',
-  calm: '#5cc9b8', hot: '#ef8a4c', notch: '#57564f', card: '#1f1f1e',
+  calm: '#2bf0a8', hot: '#ffc93c', notch: '#57564f', card: '#1f1f1e',
 }
 
 export const LIGHT: Palette = {
   track: '#e9e7e1', edge: '#d3d1c7', tile: '#f1efe8', label: '#6b6a65', value: '#2c2c2a',
-  calm: '#0f8f6f', hot: '#c25e1f', notch: '#a8a69e', card: '#f7f6f2',
+  calm: '#08a874', hot: '#b8860b', notch: '#a8a69e', card: '#f7f6f2',
 }
 
 const SANS = 'Segoe UI, system-ui, -apple-system, sans-serif'
@@ -139,14 +139,14 @@ export function gaugeSvg(percent: number | null, width: number, p: Palette): str
   const label = percent === null ? 'n/a' : `${Math.round(percent)}%`
   const inside = fill >= 48
   const textX = inside ? fill - 9 : fill + 8
-  const textFill = inside ? (ratio >= MARK ? '#3a1d08' : '#0b2a22') : p.value
+  const textFill = inside ? (ratio >= MARK ? '#3a2600' : '#04291c') : p.value
   const anchor = inside ? 'end' : 'start'
   const passed = fill > mark
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
     `<defs><linearGradient id="sb-heat" x1="0" y1="0" x2="${w}" y2="0" gradientUnits="userSpaceOnUse">`,
-    `<stop offset="0" stop-color="#2fd3a5"/><stop offset="0.45" stop-color="#5cc9b8"/><stop offset="0.55" stop-color="#e6c26a"/>`,
-    `<stop offset="0.8" stop-color="#ef8a4c"/><stop offset="1" stop-color="#e5484d"/></linearGradient>`,
+    `<stop offset="0" stop-color="#12e39a"/><stop offset="0.44" stop-color="#3ff2b4"/><stop offset="0.56" stop-color="#ffd23f"/>`,
+    `<stop offset="0.8" stop-color="#ffb21e"/><stop offset="1" stop-color="#ff4d4f"/></linearGradient>`,
     `<clipPath id="sb-cap"><rect width="${w}" height="${h}" rx="${r}"/></clipPath></defs>`,
     `<rect width="${w}" height="${h}" rx="${r}" fill="${p.track}"/>`,
     `<g clip-path="url(#sb-cap)">`,
@@ -229,4 +229,31 @@ export function gaugeText(percent: number | null, cells: number): string {
   let out = ''
   for (let i = 0; i < n; i++) out += i === mark ? '│' : i < filled ? '█' : '░'
   return out
+}
+
+export type KeyArt = { glyph?: string; glyphColor?: string; label: string; fg: string; bg: string; edge: string; hover?: boolean }
+
+/** The height of a key, its glow included: a little taller than a chip so the glow has room. */
+export const KEY_H = 30
+
+/** A pressable key as an image: a rounded fill, a crisp outline and a soft glow of the same colour. */
+export function keySvg(k: KeyArt): { svg: string; width: number } {
+  const glyphW = k.glyph ? (k.glyph.codePointAt(0)! >= 0x1f000 ? 16 : 11) + 6 : 0
+  const textW = Math.round(k.label.length * 7.6)
+  const w = 3 + 11 + glyphW + textW + 11 + 3
+  const h = KEY_H
+  const glow = k.hover ? 0.95 : 0.55
+  const parts = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
+    `<defs><filter id="g" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
+    `<rect x="3" y="3" width="${w - 6}" height="${h - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)"/>`,
+    `<rect x="3.5" y="3.5" width="${w - 7}" height="${h - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2"/>`,
+  ]
+  let x = 3 + 11
+  if (k.glyph) {
+    parts.push(`<text x="${x}" y="19.5" font-size="12" fill="${k.glyphColor ?? k.fg}" font-family="Segoe UI Symbol, Segoe UI Emoji, sans-serif">${xml(k.glyph)}</text>`)
+    x += glyphW
+  }
+  parts.push(`<text x="${x}" y="19.5" font-size="13" font-weight="600" fill="${k.fg}" font-family="${SANS}">${xml(k.label)}</text>`, `</svg>`)
+  return { svg: parts.join(''), width: w }
 }

@@ -12,7 +12,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  DARK, extractResume, GAUGE_H, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  DARK, extractResume, GAUGE_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
   LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, tilesSvg, TTL_MS,
 } from './logic'
 import type { Tile } from './logic'
@@ -42,9 +42,21 @@ let lastUserAt = 0
 let preview: { percent?: number; warm?: boolean; hold?: boolean } | null = null
 // The desktop draws Starbridge's own tinted buttons (deck-button.ts); `/starbridge buttons native`
 // falls back to the app's plain ones.
-let buttonStyle: 'custom' | 'native' = 'custom'
+let buttonStyle: 'custom' | 'flat' | 'native' = 'custom'
+// Which of Starbridge's keys the pointer is over, so its image glows brighter.
+let hovered: string | null = null
 
-type DeckSpec = { key: string; action: string; label: string; fg: string; bg: string; hoverBg: string }
+type DeckSpec = {
+  key: string; action: string; glyph?: string; glyphColor?: string; label: string
+  fg: string; bg: string; hoverBg: string; edge?: string; hoverEdge?: string
+}
+
+// The deck's keys: outlined so they read as things to press, apart from the information chips.
+const RED = '#ff4d5e'
+const KEY_HANDOVER = { glyph: '▶', glyphColor: RED, fg: '#f4f3ee', bg: '#0f2219', hoverBg: '#153526', edge: '#2bf0a8', hoverEdge: '#8dffd6' }
+const KEY_STOP = { glyph: '■', glyphColor: '#ffffff', fg: '#f4f3ee', bg: '#222220', hoverBg: '#2e2e2b', edge: '#a9a79f', hoverEdge: '#ffffff' }
+const KEY_GOLD = { fg: '#ffc93c', bg: '#2b2208', hoverBg: '#3d300b', edge: '#ffc93c', hoverEdge: '#ffe08a' }
+const KEY_QUIET = { fg: '#c9c7bf', bg: '#222220', hoverBg: '#2e2e2b', edge: '#5d5c57', hoverEdge: '#a9a79f' }
 
 /** Cells a label takes: an emoji is two wide. */
 function cellsOf(label: string): number {
@@ -252,7 +264,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'starbridge',
       description: 'Starbridge HUD: status, or warm on|off',
-      argumentHint: '[status | warm on | warm off | preview 64 warm hold | preview off]',
+      argumentHint: '[status | warm on | warm off | preview 64 warm hold | preview off | buttons custom|flat|native]',
     })
     // Countdowns move once a minute; nothing else needs a clock.
     $.clock.every(60_000, () => {
@@ -345,7 +357,15 @@ export const register: Register = on => {
 
   // A click on one of Starbridge's own buttons (deck-button.ts) arrives here.
   on('ui.message', async ($, e, next) => {
-    const action = (e.data as { action?: unknown } | null)?.action
+    const data = e.data as { action?: unknown; hover?: unknown } | null
+    if (data && 'hover' in data) {
+      const next_ = typeof data.hover === 'string' ? data.hover : null
+      if (next_ !== hovered) {
+        hovered = next_
+        $.ui.invalidate('ui.render')
+      }
+    }
+    const action = data?.action
     if (action === 'warm') void toggleWarm($)
     else if (action === 'handover') void startRun($, 'handover')
     else if (action === 'end') void startRun($, 'end')
@@ -357,7 +377,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'starbridge' }, async ($, e) => {
     const words = String(e.args ?? '').trim().split(/\s+/).filter(Boolean)
-    if (words[0] === 'buttons' && (words[1] === 'custom' || words[1] === 'native')) {
+    if (words[0] === 'buttons' && (words[1] === 'custom' || words[1] === 'flat' || words[1] === 'native')) {
       buttonStyle = words[1]
       $.ui.invalidate('ui.render')
       return { text: `Starbridge buttons: ${words[1]}` }
@@ -412,7 +432,7 @@ export const register: Register = on => {
       <Button key="starbridge-warm" label={v.warmOn ? '🔥 On' : '🔥 Off'} onPress={() => void toggleWarm($)} />
     )
     const handover = busy ? null : (
-      <Button key="starbridge-handover" label="⇄ Handover" onPress={() => void startRun($, 'handover')} />
+      <Button key="starbridge-handover" label="▶ Handover" onPress={() => void startRun($, 'handover')} />
     )
     const end = busy ? null : <Button key="starbridge-end" label="■ End session" onPress={() => void startRun($, 'end')} />
     const running = busy ? <Text color={p.hot}>{busy}</Text> : null
@@ -433,21 +453,40 @@ export const register: Register = on => {
       const { Svg } = ui
       if (buttonStyle === 'custom' && 'Client' in ui) {
         const { Client } = ui
-        const teal = { fg: '#7fe0cc', bg: '#163a33', hoverBg: '#1f5247' }
-        const quiet = { fg: '#d6d4cc', bg: '#2e2e2c', hoverBg: '#3c3c39' }
-        const ember = { fg: '#f4a26b', bg: '#46260f', hoverBg: '#5c3214' }
+        const flat = buttonStyle === 'flat'
+        const key = (spec: DeckSpec): DeckSpec => (flat ? { ...spec, edge: undefined, hoverEdge: undefined } : spec)
         const specs: DeckSpec[] = [
-          { key: 'starbridge-warm', action: 'warm', label: v.warmOn ? '🔥 On' : '🔥 Off', ...(v.warmOn ? ember : quiet) },
+          key({ key: 'starbridge-warm', action: 'warm', glyph: '🔥', label: v.warmOn ? 'On' : 'Off', ...(v.warmOn ? KEY_GOLD : KEY_QUIET) }),
           ...(busy ? [] : [
-            { key: 'starbridge-handover', action: 'handover', label: '⇄ Handover', ...teal },
-            { key: 'starbridge-end', action: 'end', label: 'End session', ...quiet },
+            key({ key: 'starbridge-handover', action: 'handover', label: 'Handover', ...KEY_HANDOVER }),
+            key({ key: 'starbridge-end', action: 'end', label: 'End session', ...KEY_STOP }),
           ]),
         ]
         const holdSpecs: DeckSpec[] = hold ? [
-          { key: 'starbridge-send', action: 'send', label: `Send for ${fmtUsd(hold.coldUsd)}`, ...ember },
-          { key: 'starbridge-edit', action: 'edit', label: 'Edit message', ...quiet },
-          { key: 'starbridge-drop', action: 'drop', label: 'Cancel', ...quiet },
+          key({ key: 'starbridge-send', action: 'send', label: `Send for ${fmtUsd(hold.coldUsd)}`, ...KEY_GOLD }),
+          key({ key: 'starbridge-edit', action: 'edit', label: 'Edit message', ...KEY_QUIET }),
+          key({ key: 'starbridge-drop', action: 'drop', label: 'Cancel', ...KEY_QUIET }),
         ] : []
+        // A key's region: the glyph and its space, the label, the padding, and the outline when drawn.
+        const widthOf = (spec: DeckSpec) => (spec.glyph ? cellsOf(spec.glyph) + 1 : 0) + cellsOf(spec.label) + 2 + (spec.edge ? 2 : 0)
+        const heightOf = (_spec: DeckSpec) => 1
+        // Outlined keys are images (outline and glow drawn crisp at chip height) with an invisible
+        // click area laid over them; flat keys are drawn by the button module itself.
+        const deckKey = (spec: DeckSpec) => {
+          if (flat || !spec.edge) {
+            return <Client key={spec.key} module="./deck-button.ts" props={spec} width={widthOf(spec)} height={heightOf(spec)} />
+          }
+          const art = keySvg({ glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg, edge: hovered === spec.action ? spec.hoverEdge ?? spec.edge : spec.edge, hover: hovered === spec.action })
+          const cells = Math.ceil(art.width / 8)
+          return (
+            <Box key={`${spec.key}-key`} position="relative">
+              <Svg source={art.svg} alt={spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label} width={art.width} height={KEY_H} />
+              <Box position="absolute" top={0} left={0}>
+                <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width={cells} height={1} />
+              </Box>
+            </Box>
+          )
+        }
         const width = Math.max(240, Math.min(1400, cols * 8 - 24))
         const strip = tiles.length > 0 ? tilesSvg(tiles, p) : null
         return (
@@ -458,12 +497,12 @@ export const register: Register = on => {
               <Box flexGrow={1} />
               {running}
               {cancelRun}
-              {specs.map(s => <Client key={s.key} module="./deck-button.ts" props={s} width={cellsOf(s.label) + 2} height={1} />)}
+              {specs.map(deckKey)}
             </Box>
             {hold ? <Svg source={holdCardSvg(width, hold, p)} alt={`Message on hold. Send now ${fmtUsd(hold.coldUsd)}, a warm turn ${fmtUsd(hold.warmUsd)}.`} width={width} height={132} /> : null}
             {hold ? (
               <Box flexDirection="row" gap={1}>
-                {holdSpecs.map(s => <Client key={s.key} module="./deck-button.ts" props={s} width={cellsOf(s.label) + 2} height={1} />)}
+                {holdSpecs.map(deckKey)}
               </Box>
             ) : null}
             {below}

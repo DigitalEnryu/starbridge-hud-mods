@@ -10,7 +10,11 @@ const PLUGIN = 'starbridge'
 // Desktop draws Starbridge's own buttons (Clients); the terminal draws native Buttons. These read and
 // click either kind by key.
 type Found = { type?: string; props: Record<string, unknown> } | undefined
-const labelOf = (el: Found) => (el?.props.label ?? (el?.props.props as { label?: string } | undefined)?.label) as string | undefined
+const labelOf = (el: Found) => {
+  if (el?.props.label !== undefined) return el.props.label as string
+  const p = el?.props.props as { glyph?: string; label?: string } | undefined
+  return p?.label === undefined ? undefined : p.glyph ? `${p.glyph} ${p.label}` : p.label
+}
 async function click(ui: { find: (q: { key: string }) => Promise<Found>; press: (q: { key: string }) => Promise<unknown>; post: (data: unknown, scope: { in: string }) => Promise<unknown> }, key: string) {
   const el = await ui.find({ key })
   if (el?.type === 'Client') await ui.post({ action: (el.props.props as { action: string }).action }, { in: key })
@@ -123,7 +127,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await start($)
     const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     expect(labelOf(await ui.find({ key: 'starbridge-warm' }))).toBe('🔥 Off')
-    expect(labelOf(await ui.find({ key: 'starbridge-handover' }))).toBe('⇄ Handover')
+    expect(labelOf(await ui.find({ key: 'starbridge-handover' }))).toBe('▶ Handover')
     expect(labelOf(await ui.find({ key: 'starbridge-end' }))).toMatch(/End session$/)
     expect((await ui.findAll({ type: 'Svg' })).length > 0).toBe(surface === 'desktop')
     await ui.unmount()
@@ -249,4 +253,17 @@ test('a deck button brightens under the pointer and posts its action on a click'
   draw()
   pointer!({ type: 'up', button: 'left', x: 1, y: 0 })
   expect(posts).toEqual([{ action: 'handover' }])
+})
+
+test('desktop keys are glowing images with a click area over them; hover brightens the glow', async ($, on) => {
+  world(on, { tokens: 120000 })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const keyArt = async () => (await ui.findAll({ type: 'Svg' })).map(svg => String(svg.props.source)).find(src => src.includes('Handover'))!
+  expect(await keyArt()).toContain('opacity="0.55"')
+  await ui.post({ hover: 'handover' }, { in: 'starbridge-handover' })
+  expect(await keyArt()).toContain('opacity="0.95"')
+  await ui.post({ hover: null }, { in: 'starbridge-handover' })
+  expect(await keyArt()).toContain('opacity="0.55"')
+  await ui.unmount()
 })
