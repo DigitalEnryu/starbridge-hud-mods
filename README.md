@@ -55,6 +55,44 @@ made-up figures; `preview off` to return), `/starbridge buttons custom|flat|nati
   [AUDIT.md](AUDIT.md). Vendored copies are listed in [vendor/README.md](vendor/README.md), forks carry a `CHANGES.md`.
 - **Remove everything:** `/plugin uninstall starbridge@starbridge-hud`, then the same for each mod above.
 
+## Notes for mod builders
+
+Things learned building Starbridge that the docs do not spell out. Checked on Claude Code 2.1.296 to 2.1.299.
+
+**The engine**
+
+- One hook per event per plugin. A second `on('ui.render', ...)` in the same plugin stops it loading: fold the
+  extra behaviour into the existing hook.
+- Pass `$` only to functions declared in the same file. Handing it to an imported helper also stops the load.
+- In the desktop app a session starts before any surface attaches, so decide whether you have a band on the first
+  `ui.render`, not in `session.start`.
+- `"dependencies"` in a plugin's `plugin.json` makes one install pull in other plugins from the same marketplace.
+  That is how this repo installs five mods with one command.
+
+**Drawing on the desktop**
+
+- Native `Button`s draw their label only: colours and children are ignored. For a styled key, draw it as an `Svg`
+  and lay an invisible `Client` over it for hover and clicks.
+- Make the key's box exactly its visible face, and stretch the `Client` over that box (`position="absolute"`,
+  all four offsets 0, `width="100%"` and `height="100%"`). Art that should reach past the face, such as sparks or a
+  jumping character, goes in a taller `Svg` hung from the face's bottom edge (`position="absolute" bottom={0}`).
+  The pointer on it falls to its parent, so it never takes a click.
+- In a row that runs short of room, `Svg`s shrink. Give keys `flexShrink={0}` and let something else give way,
+  or every key changes size when the content beside it changes.
+- SMIL animation plays only in an `Svg` with `isInteractive`. A plain one is drawn as a still image.
+- A `Box` border inside a `Client` costs a whole text row above and below, three rows in all.
+- Emoji keep their own colours, so a greyed-out emoji is not possible. Spell the state in words, or draw the
+  icon yourself.
+
+**Testing and checking**
+
+- `$.ui.ask` reaches tests as a `tool.call` of `AskUserQuestion`, not as an event of its own: mock it there.
+- To check visuals without the app, render the real SVG output in a page and screenshot it with a headless
+  browser (`msedge --headless=new --screenshot=out.png page.html`). To capture one moment of an animation, call
+  `pauseAnimations()` and `setCurrentTime(t)` on each `svg` before the shot.
+- Check any price table against the official model pricing on every model release. Copying one from another mod
+  is how stale prices get in.
+
 ## Licence
 
 Starbridge is MIT. Each other mod keeps its own licence and author credit in its folder.

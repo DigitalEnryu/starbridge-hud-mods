@@ -4,3 +4,7 @@ node_modules/
 _live-check/
 # Written by the engine when a mod loads; regenerated, never edited.
 **/.claude-plugin/types/
+# Private working notes: the maintainer's session log, handover briefs and local instructions.
+learning-log.md
+handover.md
+CLAUDE.md
