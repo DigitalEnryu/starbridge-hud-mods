@@ -12,8 +12,10 @@ our forks that add his own features. Created 2026-10-17. Plan of record:
 | `_live-check\` | throwaway scratch folder for live button tests; delete any time |
 | `AUDIT.md` | security verdict per mod, with the exact commit SHA audited |
 | `upstream\` | pinned clones of the six source repos. 🔒 Never edited, never pulled without a re-audit |
-| `forks\` | our modified copies. Each keeps the original LICENSE and copyright line, plus `CHANGES.md` |
-| `.claude-plugin\marketplace.json` | local marketplace; installs come from here, never from the authors' remotes |
+| `forks\` | our modified copies (blast-radius, reflect-mod). Each keeps the original LICENSE and copyright line, plus `CHANGES.md`. The Cache Tax and Savvy forks were retired 2026-10-17 (Starbridge does their jobs); they live in git history |
+| `vendor\` | unmodified copies of savvy-progress and filetree, so the public repo installs as one package. `vendor\README.md` lists source and commit |
+| `.claude-plugin\marketplace.json` | marketplace `starbridge-hud`; installing `starbridge` pulls in the other four as declared dependencies. Rueben's machine installs from this folder |
+| `README.md` | public front page of `DigitalEnryu/starbridge-hud-mods` |
 
 ## Rules
 

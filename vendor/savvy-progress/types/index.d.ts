@@ -53,23 +53,6 @@ declare module 'claude-code' {
       agents: AgentRun[]
       panel: Panel
       now: number
-      ctx: Ctx
-      run: SessionRun
     }
   }
-}
-
-/** Fork addition: the live context window, from `session.measure`. */
-export type Ctx = {
-  percent: number | null
-  tokens: number | null
-  window: number | null
-}
-
-/** Fork addition: a button-started handover or end session, while it runs. */
-export type SessionRun = {
-  mode: 'handover' | 'end' | null
-  /** Main-loop turns completed since the click; the run lapses after a few. */
-  turns: number
-  startedAt: number
 }

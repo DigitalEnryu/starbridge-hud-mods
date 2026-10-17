@@ -1,5 +1,9 @@
 # Starbridge HUD
 
+```
+/plugin install starbridge --marketplace DigitalEnryu/starbridge-hud-mods
+```
+
 The command deck above your Claude Code prompt. One band, three jobs:
 
 - **Gauge.** How full the context window is, with the percentage riding the fill and a notch at 50%,

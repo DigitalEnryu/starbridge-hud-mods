@@ -1,7 +1,10 @@
 {
   "name": "starbridge",
-  "version": "0.1.0",
-  "description": "Starbridge HUD: one band above the prompt with a context gauge, live cost figures, a Keep warm toggle, a cold-cache hold card, and Handover / End session buttons.",
+  "version": "0.2.0",
+  "description": "Starbridge HUD: one band above the prompt with a context gauge, live cost chips, a Keep warm toggle, a cold-cache hold card, an animated agents key, and Handover / End session buttons.",
+  "author": { "name": "DigitalEnryu", "url": "https://github.com/DigitalEnryu" },
+  "repository": "https://github.com/DigitalEnryu/starbridge-hud-mods",
   "types": "./types/index.d.ts",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": ["savvy-progress", "blast-radius", "reflect-mod", "filetree"]
 }

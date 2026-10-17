@@ -2,8 +2,6 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Flow, Panel, Phase, PlannedTask } from '../types'
-import type { Ctx, SessionRun } from '../types'
-import { windowBar, ctxColor, extractResume, isRunLive, MARK, short } from './session-logic'
 
 const flow = atom({ plugin: 'savvy-progress', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'savvy-progress', key: 'agents' } as const, [])
@@ -792,131 +790,10 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   void $.ui.open({ id: PANE, title: tr().pane })
 }
 
-// ---- Fork addition: context row and session buttons ----
-
-const ctx = atom({ plugin: 'savvy-progress', key: 'ctx' } as const, { percent: null, tokens: null, window: null })
-const run = atom({ plugin: 'savvy-progress', key: 'run' } as const, { mode: null, turns: 0, startedAt: 0 })
-
-const IDLE: SessionRun = { mode: null, turns: 0, startedAt: 0 }
-const RESUME_KEY = 'resume'
-
-const ASK_HANDOVER = 'This ends with /clear and a fresh session started from the resume prompt. Run handover now?'
-const ASK_END = 'This logs learnings and tidies, with no /clear. Run end session now?'
-const YES_HANDOVER = 'Run handover'
-const YES_END = 'Run end session'
-const NO = 'Cancel'
-
-// One taker at a time: the clear path and the SessionStart path may both try to send the resume prompt.
-let isTaking = false
-
-function toCtx(c: { tokens?: number; window: number; percent?: number }): Ctx {
-  return { percent: c.percent ?? null, tokens: c.tokens ?? null, window: c.window || null }
-}
-
-async function start($: EngineInterface, mode: 'handover' | 'end'): Promise<void> {
-  const isHandover = mode === 'handover'
-  // A dismissed dialog rejects: that is a Cancel too.
-  const pick = await $.ui
-    .ask(isHandover ? ASK_HANDOVER : ASK_END, {
-      options: [isHandover ? YES_HANDOVER : YES_END, NO],
-      header: isHandover ? 'Handover' : 'End session',
-    })
-    .catch(() => NO)
-  if (pick !== (isHandover ? YES_HANDOVER : YES_END)) return
-  const at = await $.clock.now()
-  await update($, run, () => ({ mode, turns: 0, startedAt: at }))
-  void $.prompt.submit({ text: isHandover ? 'handover' : 'end session', asUser: true })
-}
-
-/** Sends the stored resume prompt once, into whatever conversation is live now. */
-async function takeResume($: EngineInterface): Promise<void> {
-  if (isTaking) return
-  isTaking = true
-  try {
-    const text = await $.store.get(RESUME_KEY)
-    if (typeof text !== 'string' || text.length === 0) return
-    await $.store.delete(RESUME_KEY)
-    void $.prompt.submit({ text, asUser: true })
-  } finally {
-    isTaking = false
-  }
-}
-
-async function clearAndResume($: EngineInterface): Promise<void> {
-  try {
-    await $.command.run({ command: 'clear' })
-  } catch {
-    // A host that refuses a plugin's /clear still takes it typed.
-    await $.prompt.submit({ text: '/clear', asUser: true })
-  }
-  await takeResume($)
-}
-
-/** Called from the plugin's own `session.start` hook: the first reading of the window. */
-async function sessionRowStart($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage().catch(() => null)
-  if (usage) await update($, ctx, () => toCtx(usage.context))
-}
-
-/** Called from the plugin's own `turn.complete` hook, main loop only. */
-async function sessionRowTurn($: EngineInterface, e: { reason: string; answer: string }): Promise<void> {
-  const r = await read($, run)
-  const at = await $.clock.now()
-  if (!isRunLive(r, at)) {
-    if (r.mode !== null) await update($, run, () => IDLE)
-    return
-  }
-  if (r.mode === 'end') {
-    // End session has no hand-off: its first finished turn ends the run.
-    await update($, run, () => IDLE)
-    return
-  }
-  const resume = e.reason === 'answer' ? extractResume(e.answer) : null
-  if (resume === null) {
-    await update($, run, prev => ({ ...prev, turns: prev.turns + 1 }))
-    return
-  }
-  await $.store.set(RESUME_KEY, resume)
-  await update($, run, () => IDLE)
-  void $.ui.toast('Handover done. Clearing and resuming in a fresh session.')
-  // Never from inside the turn: a command run from a hook the turn waits on is refused.
-  $.clock.after(800, () => void clearAndResume($))
-}
-
-/** Called from the plugin's own `AbovePrompt` hook: the context row and the buttons. */
-async function sessionRow($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { props: { bodyColumns: number } }): Promise<unknown> {
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const c = await read($, ctx)
-  const r = await read($, run)
-  const ratio = c.percent === null ? 0 : c.percent / 100
-  const cols = e.props.bodyColumns || 100
-  const width = Math.max(10, Math.min(60, cols - 46))
-  const pct = c.percent === null ? '--' : `${c.percent}%`
-  const size = c.tokens !== null && c.window !== null ? ` ${short(c.tokens)}/${short(c.window)}` : ''
-  const busy = r.mode === 'handover' ? 'handover running' : r.mode === 'end' ? 'end session running' : ''
-
-  return (
-    <Box key="savvy-session-row" flexDirection="row" alignItems="center" gap={1}>
-      <Text dimColor>ctx</Text>
-      <Text color={ctxColor(ratio)}>{windowBar(ratio, width)}</Text>
-      <Text bold color={ratio >= MARK ? ctxColor(ratio) : undefined}>{pct}</Text>
-      <Text dimColor>{size}</Text>
-      {busy ? <Text color="#e0a040">{busy}</Text> : null}
-      {busy ? <Button key="savvy-run-cancel" label="✕" plain onPress={() => update($, run, () => IDLE)} /> : null}
-      {busy ? null : <Button key="savvy-handover" label="Handover" onPress={() => void start($, 'handover')} />}
-      {busy ? null : <Button key="savvy-end-session" label="End session" onPress={() => void start($, 'end')} />}
-    </Box>
-  )
-}
-
-// ---- end fork addition ----
-
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($, options.language)
-    // Fork addition: the context row's first reading.
-    await sessionRowStart($)
     await $.tool.register({
       name: 'progress',
       description:
@@ -1120,8 +997,6 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const agentId = e.agentId
-    // Fork addition: a button-started handover watches the main loop's answers.
-    if (!agentId) await sessionRowTurn($, e)
     if (agentId) {
       const at = await $.clock.now()
       await update($, agents, list =>
@@ -1329,7 +1204,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const f = await read($, flow)
-    if (e.props.hasSurvey) return next(e)
+    if (f === null || e.props.hasSurvey) return next(e)
     // Draw this row with the other mods' bands beneath it. Claude Code's own placeholder ({ type: 'engine' }) is
     // never nested: the desktop drops a band that nests it.
     const drawn = await Promise.resolve(next(e)).catch(() => null)
@@ -1337,16 +1212,6 @@ export const register: Register = (on, options) => {
 
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
-    // Fork addition: the context row and session buttons, always drawn, beneath the flow row.
-    const session = await sessionRow($, e)
-    if (f === null) {
-      return (
-        <Box flexDirection="column">
-          {session}
-          {below}
-        </Box>
-      )
-    }
     const list = await read($, agents)
     const crew = list.length + plannedOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
@@ -1377,7 +1242,6 @@ export const register: Register = (on, options) => {
             {crewButton}
             {dismiss}
           </Box>
-          {session}
           {below}
         </Box>
       )
@@ -1400,24 +1264,8 @@ export const register: Register = (on, options) => {
           {crewButton}
           {dismiss}
         </Box>
-        {session}
         {below}
       </Box>
     )
-  })
-
-  // Fork addition: the two events the plugin had no hook for.
-  on('session.measure', async ($, e, next) => {
-    await update($, ctx, () => toCtx(e.context))
-    return next(e)
-  })
-
-  // After a /clear, whoever got here first sends the resume prompt.
-  on('classic.SessionStart', async ($, e, next) => {
-    const result = await next(e)
-    if ((e as { source?: string }).source === 'clear') {
-      $.clock.after(1500, () => void takeResume($))
-    }
-    return result
   })
 }
