@@ -1,0 +1,7 @@
+{
+  "name": "starbridge",
+  "version": "0.1.0",
+  "description": "Starbridge HUD: one band above the prompt with a context gauge, live cost figures, a Keep warm toggle, a cold-cache hold card, and Handover / End session buttons.",
+  "types": "./types/index.d.ts",
+  "license": "MIT"
+}

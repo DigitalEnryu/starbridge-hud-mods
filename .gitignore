@@ -1,0 +1,6 @@
+upstream/
+node_modules/
+# Throwaway folder for live button tests.
+_live-check/
+# Written by the engine when a mod loads; regenerated, never edited.
+**/.claude-plugin/types/

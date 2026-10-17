@@ -1,0 +1,14 @@
+{
+  "name": "local-mods",
+  "owner": { "name": "local" },
+  "metadata": { "description": "Starbridge HUD (ours), plus audited mods from pinned local clones and our forks of them. See AUDIT.md." },
+  "plugins": [
+    { "name": "starbridge", "source": "./starbridge", "description": "Starbridge HUD: context gauge, cost tiles, Keep warm, cold-cache hold card, Handover and End session" },
+    { "name": "skins", "source": "./upstream/claude-skins", "description": "Claude Skins, pinned c2bd36f" },
+    { "name": "filetree", "source": "./upstream/claude-code-filetree", "description": "Filetree, pinned 1b3e72c" },
+    { "name": "savvy-progress", "source": "./upstream/claude-kit/plugins/savvy-progress", "description": "Savvy Progress, pinned c871c15 (agents panel; Starbridge replaced the fork's row)" },
+    { "name": "cache-tax", "source": "./forks/cache-tax", "description": "Cache Tax fork, retired: Starbridge does its job. Kept for reference" },
+    { "name": "blast-radius", "source": "./forks/blast-radius", "description": "Blast Radius fork: Windows fixes" },
+    { "name": "reflect-mod", "source": "./forks/reflect-mod", "description": "Reflect fork: Windows home path, global save off by default" }
+  ]
+}
