@@ -255,16 +255,36 @@ test('a deck button brightens under the pointer and posts its action on a click'
   expect(posts).toEqual([{ action: 'handover' }])
 })
 
-test('desktop keys are glowing images with a click area over them; hover brightens the glow', async ($, on) => {
-  world(on, { tokens: 120000 })
+test('hover fades a glow in and out on a layer of its own; the key art never changes, so animations never restart', async ($, on) => {
+  const w = world(on, { tokens: 120000 })
   await start($)
   const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
-  const keyArt = async () => (await ui.findAll({ type: 'Svg' })).map(svg => String(svg.props.source)).find(src => src.includes('Handover'))!
-  expect(await keyArt()).toContain('opacity="0.55"')
-  await ui.post({ hover: 'handover' }, { in: 'starbridge-handover' })
-  expect(await keyArt()).toContain('opacity="0.95"')
-  await ui.post({ hover: null }, { in: 'starbridge-handover' })
-  expect(await keyArt()).toContain('opacity="0.55"')
+  const svgs = async () => (await ui.findAll({ type: 'Svg' })).map(svg => ({ alt: String(svg.props.alt), src: String(svg.props.source) }))
+  const art = async (alt: string) => (await svgs()).find(s => s.alt === alt)!.src
+  const glow = async (alt: string) => Number((await svgs()).find(s => s.alt === `${alt} glow`)!.src.match(/opacity="([\d.]+)"/)![1])
+  for (const [action, key, alt] of [['crew', 'starbridge-crew', 'Agents panel'], ['handover', 'starbridge-handover', '▶ Handover']] as const) {
+    const before = await art(alt)
+    const rest = await glow(alt)
+    await ui.post({ hover: action }, { in: key })
+    await w.clock.advance(60)
+    const rising = await glow(alt)
+    expect(rising > rest && rising < 0.95).toBe(true)
+    await w.clock.advance(400)
+    expect(await glow(alt)).toBe(0.95)
+    expect(await art(alt)).toBe(before)
+    // Leaving mid-fade turns it round from where it is: no jump to full, no jump to rest.
+    await ui.post({ hover: null }, { in: key })
+    await w.clock.advance(30)
+    const falling = await glow(alt)
+    expect(falling < 0.95 && falling > rest).toBe(true)
+    await ui.post({ hover: action }, { in: key })
+    await w.clock.advance(30)
+    expect(await glow(alt) > falling).toBe(true)
+    await ui.post({ hover: null }, { in: key })
+    await w.clock.advance(600)
+    expect(await glow(alt)).toBe(rest)
+    expect(await art(alt)).toBe(before)
+  }
   await ui.unmount()
 })
 
@@ -338,9 +358,12 @@ test('a key takes exactly its face: sparks and the jumping mascot hang above it,
     // In the flow: one image the height of the face. The click area is stretched over that box alone.
     const inFlow = kids.filter(k => k.props?.position !== 'absolute')
     expect(inFlow.map(k => [k.type, k.props?.height])).toEqual([['Svg', KEY_H]])
-    // Anything taller hangs from the face's bottom edge, out of the flow.
-    for (const k of kids.filter(k => k.props?.position === 'absolute' && k.props?.bottom === 0 && k.props?.top === undefined)) {
-      expect(((k as { children?: Node[] }).children ?? [])[0]?.props?.height).toBe(KEY_CANVAS_H)
+    // The art and its glow hang from the face's bottom edge, out of the flow: face height, or taller
+    // where the art reaches up (sparks, the jumping mascot).
+    const hung = kids.filter(k => k.props?.position === 'absolute' && k.props?.bottom === 0 && k.props?.top === undefined)
+    expect(hung.length).toBe(2)
+    for (const k of hung) {
+      expect([KEY_H, KEY_CANVAS_H]).toContain(((k as { children?: Node[] }).children ?? [])[0]?.props?.height)
     }
   }
   await ui.unmount()

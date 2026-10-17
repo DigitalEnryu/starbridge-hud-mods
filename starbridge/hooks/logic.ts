@@ -248,7 +248,7 @@ export function gaugeText(percent: number | null, cells: number): string {
 }
 
 export type KeyArt = {
-  glyph?: string; glyphColor?: string; label: string; fg: string; bg: string; edge: string; hover?: boolean
+  glyph?: string; glyphColor?: string; label: string; fg: string; bg: string; edge: string
   /** Size the key for this label instead, so a key whose label changes (On, Off) never changes size. */
   sizeAs?: string
   /** Draw a flame in place of a glyph: burning and throwing sparks, or still and grey. */
@@ -307,9 +307,27 @@ function flameSvg(state: 'on' | 'off', cx: number, base: number): string {
   return flame + sparks.join('')
 }
 
+/** The glow behind a key at rest, and under the pointer. */
+export const GLOW_REST = 0.55
+export const GLOW_LIT = 0.95
+
 /**
- * A pressable key as an image: a rounded fill, a crisp outline and a soft glow of the same colour, with
- * `KEY_TOP` of headroom above when `headroom` says so (`height` is then KEY_CANVAS_H, else KEY_H).
+ * A key's glow, drawn on a layer of its own behind the key: a soft ring of `color` round the face, at
+ * `opacity`. The pointer fades this layer, never the key itself, so an animated key never redraws.
+ */
+export function glowSvg(g: { width: number; height: number; color: string; opacity: number }): string {
+  const top = g.height - KEY_H
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${g.width}" height="${g.height}" viewBox="0 0 ${g.width} ${g.height}">`,
+    `<defs><filter id="g" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
+    `<rect x="3" y="${top + 3}" width="${g.width - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${g.color}" stroke-width="2.5" opacity="${g.opacity}" filter="url(#g)"/>`,
+    `</svg>`,
+  ].join('')
+}
+
+/**
+ * A pressable key as an image: a rounded fill and a crisp outline, with `KEY_TOP` of headroom above when
+ * `headroom` says so (`height` is then KEY_CANVAS_H, else KEY_H). Its glow is a separate layer (glowSvg).
  * `isAnimated` says the drawing moves, so it needs an interactive Svg to play.
  */
 export function keySvg(k: KeyArt): { svg: string; width: number; height: number; isAnimated: boolean } {
@@ -318,13 +336,14 @@ export function keySvg(k: KeyArt): { svg: string; width: number; height: number;
   const top = (k.headroom ?? Boolean(k.flame)) ? KEY_TOP : 0
   const h = top + KEY_H
   const lit = k.flame === 'on'
-  const glow = k.hover ? 0.95 : 0.55
-  // A lit key's glow breathes; under the pointer it holds bright.
-  const breathe = lit && !k.hover ? `<animate attributeName="opacity" values="0.45;0.95;0.45" dur="2.4s" repeatCount="indefinite"/>` : ''
+  // A lit key adds a slow breath of extra glow over the glow layer.
+  const breathe = lit
+    ? `<rect x="3" y="${top + 3}" width="${w - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="0" filter="url(#g)"><animate attributeName="opacity" values="0;0.6;0" dur="2.4s" repeatCount="indefinite"/></rect>`
+    : ''
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
     `<defs><filter id="g" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
-    `<rect x="3" y="${top + 3}" width="${w - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)">${breathe}</rect>`,
+    breathe,
     `<rect x="3.5" y="${top + 3.5}" width="${w - 7}" height="${KEY_H - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2"/>`,
   ]
   // The mark and label sit centred, so a shorter label than `sizeAs` leaves even space both sides.
@@ -401,7 +420,7 @@ const CREW_OY = 7
  * the frame, on purpose: standing, its head and shoulders show over the rim, and it jumps clear of the
  * top into the headroom. Side to side it always keeps clear of the frame's edges.
  */
-export function crewKeySvg(k: { edge: string; bg: string; hover?: boolean; running?: number }): { svg: string; width: number } {
+export function crewKeySvg(k: { edge: string; bg: string; running?: number }): { svg: string; width: number } {
   const h = KEY_CANVAS_H
   const cell = 3
   const w = 12 * cell + 2 * 4 + 6
@@ -415,7 +434,6 @@ export function crewKeySvg(k: { edge: string; bg: string; hover?: boolean; runni
     const rects = px.map(([x, y, c]) => `<rect x="${ox + x * cell}" y="${oy + y * cell}" width="${cell}" height="${cell}" fill="${c}"/>`).join('')
     return `<g opacity="${i === 0 ? 1 : 0}"><animate attributeName="opacity" values="${values}" keyTimes="${keyTimes}" dur="${dur}s" calcMode="discrete" repeatCount="indefinite"/>${rects}</g>`
   })
-  const glow = k.hover ? 0.95 : 0.55
   const top = KEY_TOP
   const badge = k.running && k.running > 0
     ? `<circle cx="${w - 8}" cy="${top + 8}" r="6" fill="#ff4d5e"/><text x="${w - 8}" y="${top + 11}" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff" font-family="${SANS}">${Math.min(9, k.running)}</text>`
@@ -423,8 +441,6 @@ export function crewKeySvg(k: { edge: string; bg: string; hover?: boolean; runni
   return {
     svg: [
       `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`,
-      `<defs><filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
-      `<rect x="3" y="${top + 3}" width="${w - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)" shape-rendering="auto"/>`,
       `<rect x="3.5" y="${top + 3.5}" width="${w - 7}" height="${KEY_H - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2" shape-rendering="auto"/>`,
       ...frames,
       badge,

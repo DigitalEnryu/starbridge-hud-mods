@@ -12,7 +12,7 @@ import type { EngineInterface, Register, RenderNode } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, KEY_CANVAS_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, glowSvg, GLOW_LIT, GLOW_REST, KEY_CANVAS_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
   LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, shortened, stripWidth, tilesSvg, TTL_MS,
 } from './logic'
 import type { Tile } from './logic'
@@ -46,8 +46,15 @@ let preview: { percent?: number; warm?: boolean; hold?: boolean } | null = null
 // The desktop draws Starbridge's own tinted buttons (deck-button.ts); `/starbridge buttons native`
 // falls back to the app's plain ones.
 let buttonStyle: 'custom' | 'flat' | 'native' = 'custom'
-// Which of Starbridge's keys the pointer is over, so its image glows brighter.
+// Which of Starbridge's keys the pointer is over, and how far each key's glow has faded in: 0 at rest,
+// 1 fully lit. The glow steps toward its target on a short timer, turning round from wherever it is
+// when the pointer comes and goes quickly. Only the glow layer redraws; the key art never does.
 let hovered: string | null = null
+const glowLevel: Record<string, number> = {}
+let glowTimer: { cancel: () => void } | null = null
+const GLOW_TICK_MS = 30
+const GLOW_IN_STEP = 0.2 // full in 150ms
+const GLOW_OUT_STEP = 0.125 // back to rest in 240ms
 
 type DeckSpec = {
   key: string; action: string; glyph?: string; glyphColor?: string; label: string
@@ -75,6 +82,29 @@ function dressed(v: View, now: number): View {
   if (preview.warm) Object.assign(out, { warmOn: true, pings: 3, pingUsd: 0.06, saves: 1, savedUsd: 1.56, nextPingAt: now + 41 * 60000, stopped: null })
   if (preview.hold) Object.assign(out, { tokens: 52000, model: out.model ?? 'opus-5', lastRequestAt: now - 72 * 60000, hold: { text: 'Where were we? Give me a 2 line recap.', at: now } })
   return out
+}
+
+// ---- Hover glow ------------------------------------------------------------------------------
+
+/** One step of every moving glow toward its target, then another step in a moment while any still moves. */
+function stepGlow($: EngineInterface): void {
+  glowTimer = null
+  let isMoving = false
+  for (const action of new Set([...Object.keys(glowLevel), ...(hovered ? [hovered] : [])])) {
+    const target = hovered === action ? 1 : 0
+    const at = glowLevel[action] ?? 0
+    if (at === target) continue
+    const next = target > at ? Math.min(1, at + GLOW_IN_STEP) : Math.max(0, at - GLOW_OUT_STEP)
+    glowLevel[action] = Math.round(next * 1000) / 1000
+    if (glowLevel[action] !== target) isMoving = true
+  }
+  $.ui.invalidate('ui.render')
+  if (isMoving) glowTimer = $.clock.after(GLOW_TICK_MS, () => stepGlow($))
+}
+
+/** The glow layer's opacity for a key: rest, lit, or on the way between. */
+function glowOpacity(action: string): number {
+  return Math.round((GLOW_REST + (GLOW_LIT - GLOW_REST) * (glowLevel[action] ?? 0)) * 1000) / 1000
 }
 
 // ---- Keep warm -------------------------------------------------------------------------------
@@ -414,7 +444,8 @@ export const register: Register = on => {
       const next_ = typeof data.hover === 'string' ? data.hover : null
       if (next_ !== hovered) {
         hovered = next_
-        $.ui.invalidate('ui.render')
+        // A fade already under way picks up the new target on its next step.
+        if (!glowTimer) stepGlow($)
       }
     }
     const action = data?.action
@@ -524,41 +555,40 @@ export const register: Register = on => {
         // A key's region: the glyph and its space, the label, the padding, and the outline when drawn.
         const widthOf = (spec: DeckSpec) => (spec.glyph ? cellsOf(spec.glyph) + 1 : 0) + cellsOf(spec.label) + 2 + (spec.edge ? 2 : 0)
         const heightOf = (_spec: DeckSpec) => 1
-        // Outlined keys are images (outline and glow drawn crisp at chip height) with an invisible
-        // click area laid over them; flat keys are drawn by the button module itself.
-        // The mascot key: a square of its own, the 12-pose loop animating inside (an interactive Svg
-        // runs SMIL), with the same invisible click area laid over it.
-        const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', hover: hovered === 'crew' })
+        // A key is three layers over a blank that holds its place in the row, exactly the size of its face
+        // (KEY_H): its glow, its art, and an invisible click area stretched over the face (all four
+        // offsets, 100% each way), so the face, and only the face, takes a click. The glow and the art
+        // hang from the face's bottom edge, out of the flow; art that reaches higher (the sparks, the
+        // jumping mascot) is a KEY_CANVAS_H image, and the pointer on it is on the key's Box, which does
+        // nothing. The art never changes under the pointer, so an animated key never redraws and never
+        // restarts: hover fades the glow layer alone (stepGlow). Keys never shrink: chips give way (stripOf).
+        const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17' })
         const crewCells = Math.ceil(crewArt.width / 8)
-        // A key's box in the row is exactly its face (KEY_H tall). The invisible click area is stretched
-        // over that box (all four offsets, 100% each way), so the face, and only the face, takes a click.
-        // Art that reaches higher (the sparks, the jumping mascot) is a KEY_CANVAS_H image hung from the
-        // face's bottom edge, out of the flow: the pointer on it is on the key's Box, which does nothing.
-        // Keys never shrink: when the row runs short, chips give way (stripOf).
-        const pressable = (key: string, alt: string, art: { svg: string; width: number; height: number }, isInteractive: boolean, hit: RenderNode) => (
-          <Box key={`${key}-key`} position="relative" flexShrink={0}>
-            {art.height > KEY_H ? <Svg source={blankSvg(art.width, KEY_H)} alt={`${alt} key`} width={art.width} height={KEY_H} /> : <Svg source={art.svg} alt={alt} width={art.width} height={KEY_H} isInteractive={isInteractive} />}
-            {art.height > KEY_H ? (
-              <Box position="absolute" bottom={0} left={0}>
-                <Svg source={art.svg} alt={alt} width={art.width} height={art.height} isInteractive={isInteractive} />
-              </Box>
-            ) : null}
+        const pressable = (o: { key: string; action: string; alt: string; art: { svg: string; width: number; height: number }; isInteractive: boolean; glow: string; hit: RenderNode }) => (
+          <Box key={`${o.key}-key`} position="relative" flexShrink={0}>
+            <Svg key={`${o.key}-place`} source={blankSvg(o.art.width, KEY_H)} alt={`${o.alt} key`} width={o.art.width} height={KEY_H} />
+            <Box position="absolute" bottom={0} left={0}>
+              <Svg key={`${o.key}-glow`} source={glowSvg({ width: o.art.width, height: o.art.height, color: o.glow, opacity: glowOpacity(o.action) })} alt={`${o.alt} glow`} width={o.art.width} height={o.art.height} />
+            </Box>
+            <Box position="absolute" bottom={0} left={0}>
+              <Svg key={`${o.key}-art`} source={o.art.svg} alt={o.alt} width={o.art.width} height={o.art.height} isInteractive={o.isInteractive} />
+            </Box>
             <Box position="absolute" top={0} bottom={0} left={0} right={0}>
-              {hit}
+              {o.hit}
             </Box>
           </Box>
         )
         const crewKey = flat ? (
           <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
-        ) : pressable('starbridge-crew', 'Agents panel', { ...crewArt, height: KEY_CANVAS_H }, true,
-          <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width="100%" height="100%" />,
-        )
+        ) : pressable({
+          key: 'starbridge-crew', action: 'crew', alt: 'Agents panel', art: { ...crewArt, height: KEY_CANVAS_H }, isInteractive: true, glow: '#d97757',
+          hit: <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width="100%" height="100%" />,
+        })
         // Keep warm draws a flame of its own, and is sized for its longer label so On and Off match.
         const artOf = (spec: DeckSpec) => {
           const isWarm = spec.action === 'warm'
           return keySvg({
-            glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg,
-            edge: hovered === spec.action ? spec.hoverEdge ?? spec.edge! : spec.edge!, hover: hovered === spec.action,
+            glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg, edge: spec.edge!,
             ...(isWarm ? { sizeAs: 'Off', flame: v.warmOn ? 'on' as const : 'off' as const } : {}),
           })
         }
@@ -569,9 +599,11 @@ export const register: Register = on => {
           const art = artOf(spec)
           const cells = Math.ceil(art.width / 8)
           // Keep warm is always a frame, lit or not, so switching it never swaps an image for a frame.
-          return pressable(spec.key, spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label, art, spec.action === 'warm' || art.isAnimated,
-            <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width="100%" height="100%" />,
-          )
+          return pressable({
+            key: spec.key, action: spec.action, alt: spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label, art,
+            isInteractive: spec.action === 'warm' || art.isAnimated, glow: spec.hoverEdge ?? spec.edge,
+            hit: <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width="100%" height="100%" />,
+          })
         }
         const width = Math.max(240, Math.min(1400, cols * 8 - 24))
         const keysPx = (flat ? 0 : crewArt.width) + specs.reduce((sum, s) => sum + (flat || !s.edge ? widthOf(s) * 8 : artOf(s).width), 0)
