@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import DeckButton from './deck-button'
-import { coldUsd, crewKeySvg, DARK, extractResume, gaugeSvg, gaugeText, holdCardSvg, isRunLive, KEY_TOP, keySvg, priceOf, RUN_MAX_MS, warmUsd } from './logic'
+import { coldUsd, crewKeySvg, DARK, extractResume, gaugeSvg, gaugeText, holdCardSvg, isRunLive, KEY_CANVAS_H, KEY_H, KEY_TOP, keySvg, priceOf, RUN_MAX_MS, warmUsd } from './logic'
 
 const PLUGIN = 'starbridge'
 
@@ -322,6 +322,26 @@ test('each key\'s click area fills the whole key, so a click anywhere on it land
   for (const key of ['starbridge-crew', 'starbridge-warm', 'starbridge-handover', 'starbridge-end']) {
     const el = await ui.find({ key })
     expect([el?.props.width, el?.props.height]).toEqual(['100%', '100%'])
+  }
+  await ui.unmount()
+})
+
+test('a key takes exactly its face: sparks and the jumping mascot hang above it, outside the click area', async ($, on) => {
+  const w = world(on, { tokens: 120000 })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  await click(ui as never, 'starbridge-warm')
+  await w.clock.settle()
+  type Node = { type?: string; props?: Record<string, unknown> }
+  for (const key of ['starbridge-crew-key', 'starbridge-warm-key', 'starbridge-handover-key', 'starbridge-end-key']) {
+    const kids = ((await ui.find({ key }))?.children ?? []) as Node[]
+    // In the flow: one image the height of the face. The click area is stretched over that box alone.
+    const inFlow = kids.filter(k => k.props?.position !== 'absolute')
+    expect(inFlow.map(k => [k.type, k.props?.height])).toEqual([['Svg', KEY_H]])
+    // Anything taller hangs from the face's bottom edge, out of the flow.
+    for (const k of kids.filter(k => k.props?.position === 'absolute' && k.props?.bottom === 0 && k.props?.top === undefined)) {
+      expect(((k as { children?: Node[] }).children ?? [])[0]?.props?.height).toBe(KEY_CANVAS_H)
+    }
   }
   await ui.unmount()
 })

@@ -8,11 +8,11 @@
 // The host reads `on(...)` and `$.noun.method(...)` from source, so helpers that take `$`
 // are top-level functions in this file and every `$` call is spelled out.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderNode } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  crewKeySvg, DARK, extractResume, GAUGE_H, KEY_CANVAS_H, KEY_TOP, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, KEY_CANVAS_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
   LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, shortened, stripWidth, tilesSvg, TTL_MS,
 } from './logic'
 import type { Tile } from './logic'
@@ -530,18 +530,28 @@ export const register: Register = on => {
         // runs SMIL), with the same invisible click area laid over it.
         const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', hover: hovered === 'crew' })
         const crewCells = Math.ceil(crewArt.width / 8)
-        // Every key image is KEY_CANVAS_H tall, its face below KEY_TOP of headroom; the invisible click
-        // area is stretched over the whole image (all four offsets, 100% each way), so it sits exactly on
-        // the key whatever a cell measures. Keys never shrink: when the row runs short, chips give way (stripOf).
-        const crewKey = flat ? (
-          <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
-        ) : (
-          <Box key="starbridge-crew-key" position="relative" flexShrink={0}>
-            <Svg source={crewArt.svg} alt="Agents panel" width={crewArt.width} height={KEY_CANVAS_H} isInteractive />
+        // A key's box in the row is exactly its face (KEY_H tall). The invisible click area is stretched
+        // over that box (all four offsets, 100% each way), so the face, and only the face, takes a click.
+        // Art that reaches higher (the sparks, the jumping mascot) is a KEY_CANVAS_H image hung from the
+        // face's bottom edge, out of the flow: the pointer on it is on the key's Box, which does nothing.
+        // Keys never shrink: when the row runs short, chips give way (stripOf).
+        const pressable = (key: string, alt: string, art: { svg: string; width: number; height: number }, isInteractive: boolean, hit: RenderNode) => (
+          <Box key={`${key}-key`} position="relative" flexShrink={0}>
+            {art.height > KEY_H ? <Svg source={blankSvg(art.width, KEY_H)} alt={`${alt} key`} width={art.width} height={KEY_H} /> : <Svg source={art.svg} alt={alt} width={art.width} height={KEY_H} isInteractive={isInteractive} />}
+            {art.height > KEY_H ? (
+              <Box position="absolute" bottom={0} left={0}>
+                <Svg source={art.svg} alt={alt} width={art.width} height={art.height} isInteractive={isInteractive} />
+              </Box>
+            ) : null}
             <Box position="absolute" top={0} bottom={0} left={0} right={0}>
-              <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width="100%" height="100%" />
+              {hit}
             </Box>
           </Box>
+        )
+        const crewKey = flat ? (
+          <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
+        ) : pressable('starbridge-crew', 'Agents panel', { ...crewArt, height: KEY_CANVAS_H }, true,
+          <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width="100%" height="100%" />,
         )
         // Keep warm draws a flame of its own, and is sized for its longer label so On and Off match.
         const artOf = (spec: DeckSpec) => {
@@ -559,37 +569,30 @@ export const register: Register = on => {
           const art = artOf(spec)
           const cells = Math.ceil(art.width / 8)
           // Keep warm is always a frame, lit or not, so switching it never swaps an image for a frame.
-          return (
-            <Box key={`${spec.key}-key`} position="relative" flexShrink={0}>
-              <Svg source={art.svg} alt={spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label} width={art.width} height={KEY_CANVAS_H} isInteractive={spec.action === 'warm' || art.isAnimated} />
-              <Box position="absolute" top={0} bottom={0} left={0} right={0}>
-                <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width="100%" height="100%" />
-              </Box>
-            </Box>
+          return pressable(spec.key, spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label, art, spec.action === 'warm' || art.isAnimated,
+            <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width="100%" height="100%" />,
           )
         }
         const width = Math.max(240, Math.min(1400, cols * 8 - 24))
         const keysPx = (flat ? 0 : crewArt.width) + specs.reduce((sum, s) => sum + (flat || !s.edge ? widthOf(s) * 8 : artOf(s).width), 0)
         const budget = width - keysPx - ROW_GAP_PX * (specs.length + 2) - (busy ? busy.length * 7 + 40 : 0)
         const { tiles: shown, full, slot } = stripOf(v, now, budget)
-        const strip = shown.length > 0 ? tilesSvg(shown, p, flat ? { slot } : { slot, top: KEY_TOP + 2, height: KEY_CANVAS_H }) : null
+        const strip = shown.length > 0 ? tilesSvg(shown, p, { slot }) : null
         return (
           <Box flexDirection="column" gap={1}>
-            {/* No gap here: the keys' headroom is the space between the gauge and the row. */}
-            <Box flexDirection="column">
-              <Svg source={gaugeSvg(v.percent, width, p)} alt={`Context ${v.percent ?? 0}% full`} width={width} height={GAUGE_H} />
-              <Box flexDirection="row" alignItems="center" gap={1}>
-                {strip ? (
-                  <Box flexShrink={1}>
-                    <Svg source={strip.svg} alt={full.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={flat ? TILE_H : KEY_CANVAS_H} />
-                  </Box>
-                ) : null}
-                <Box flexGrow={1} />
-                {running}
-                {cancelRun}
-                {crewKey}
-                {specs.map(deckKey)}
-              </Box>
+            {/* The gap between gauge and row is where the sparks and the jumping mascot reach. */}
+            <Svg source={gaugeSvg(v.percent, width, p)} alt={`Context ${v.percent ?? 0}% full`} width={width} height={GAUGE_H} />
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              {strip ? (
+                <Box flexShrink={1}>
+                  <Svg source={strip.svg} alt={full.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={TILE_H} />
+                </Box>
+              ) : null}
+              <Box flexGrow={1} />
+              {running}
+              {cancelRun}
+              {crewKey}
+              {specs.map(deckKey)}
             </Box>
             {hold ? <Svg source={holdCardSvg(width, hold, p)} alt={`Message on hold. Send now ${fmtUsd(hold.coldUsd)}, a warm turn ${fmtUsd(hold.warmUsd)}.`} width={width} height={132} /> : null}
             {hold ? (

@@ -253,6 +253,13 @@ export type KeyArt = {
   sizeAs?: string
   /** Draw a flame in place of a glyph: burning and throwing sparks, or still and grey. */
   flame?: 'on' | 'off'
+  /** Draw `KEY_TOP` of headroom above the face (for sparks). Defaults to on for a flame key. */
+  headroom?: boolean
+}
+
+/** An empty drawing: what holds a key's place in the row while its art hangs over it. */
+export function blankSvg(w: number, h: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"></svg>`
 }
 
 /** The height of a key's face, its glow included: a little taller than a chip so the glow has room. */
@@ -301,14 +308,15 @@ function flameSvg(state: 'on' | 'off', cx: number, base: number): string {
 }
 
 /**
- * A pressable key as an image: a rounded fill, a crisp outline and a soft glow of the same colour, below
- * `KEY_TOP` of headroom. `isAnimated` says the drawing moves, so it needs an interactive Svg to play.
+ * A pressable key as an image: a rounded fill, a crisp outline and a soft glow of the same colour, with
+ * `KEY_TOP` of headroom above when `headroom` says so (`height` is then KEY_CANVAS_H, else KEY_H).
+ * `isAnimated` says the drawing moves, so it needs an interactive Svg to play.
  */
-export function keySvg(k: KeyArt): { svg: string; width: number; isAnimated: boolean } {
+export function keySvg(k: KeyArt): { svg: string; width: number; height: number; isAnimated: boolean } {
   const markW = k.flame ? FLAME_W + 6 : k.glyph ? (k.glyph.codePointAt(0)! >= 0x1f000 ? 16 : 11) + 6 : 0
   const w = 3 + 8 + markW + textWidth(k.sizeAs ?? k.label) + 8 + 3
-  const h = KEY_CANVAS_H
-  const top = KEY_TOP
+  const top = (k.headroom ?? Boolean(k.flame)) ? KEY_TOP : 0
+  const h = top + KEY_H
   const lit = k.flame === 'on'
   const glow = k.hover ? 0.95 : 0.55
   // A lit key's glow breathes; under the pointer it holds bright.
@@ -329,7 +337,7 @@ export function keySvg(k: KeyArt): { svg: string; width: number; isAnimated: boo
     x += markW
   }
   parts.push(`<text x="${x}" y="${top + 19.5}" font-size="13" font-weight="600" fill="${k.fg}" font-family="${SANS}">${xml(k.label)}</text>`, `</svg>`)
-  return { svg: parts.join(''), width: w, isAnimated: lit }
+  return { svg: parts.join(''), width: w, height: h, isAnimated: lit }
 }
 
 // ---- The crew key: a pixel mascot that loops through 12 poses --------------------------------
