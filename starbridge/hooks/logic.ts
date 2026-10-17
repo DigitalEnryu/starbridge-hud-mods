@@ -240,7 +240,7 @@ export const KEY_H = 30
 export function keySvg(k: KeyArt): { svg: string; width: number } {
   const glyphW = k.glyph ? (k.glyph.codePointAt(0)! >= 0x1f000 ? 16 : 11) + 6 : 0
   const textW = Math.round(k.label.length * 7.6)
-  const w = 3 + 11 + glyphW + textW + 11 + 3
+  const w = 3 + 8 + glyphW + textW + 8 + 3
   const h = KEY_H
   const glow = k.hover ? 0.95 : 0.55
   const parts = [
@@ -249,11 +249,94 @@ export function keySvg(k: KeyArt): { svg: string; width: number } {
     `<rect x="3" y="3" width="${w - 6}" height="${h - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)"/>`,
     `<rect x="3.5" y="3.5" width="${w - 7}" height="${h - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2"/>`,
   ]
-  let x = 3 + 11
+  let x = 3 + 8
   if (k.glyph) {
     parts.push(`<text x="${x}" y="19.5" font-size="12" fill="${k.glyphColor ?? k.fg}" font-family="Segoe UI Symbol, Segoe UI Emoji, sans-serif">${xml(k.glyph)}</text>`)
     x += glyphW
   }
   parts.push(`<text x="${x}" y="19.5" font-size="13" font-weight="600" fill="${k.fg}" font-family="${SANS}">${xml(k.label)}</text>`, `</svg>`)
   return { svg: parts.join(''), width: w }
+}
+
+// ---- The crew key: a pixel mascot that loops through 12 poses --------------------------------
+
+type Px = readonly [number, number, string]
+
+const CLAY = '#d97757'
+const EYE = '#1b1b1a'
+const STEEL = '#a9a79f'
+const COOKIE = '#e0a84a'
+const CHIP = '#6b3f1f'
+const SCREEN = '#2bf0a8'
+
+/** One pose of the mascot on a 12 x 9 grid: body, eyes, claws and legs, plus a prop when it holds one. */
+function pose(opts: { lift?: number; blink?: boolean; claws?: 'side' | 'up' | 'down' | 'wave' | 'eat'; legs?: 'stand' | 'tuck'; prop?: 'laptop' | 'bar' | 'cookie' | 'crumb' }): Px[] {
+  const y0 = 2 - (opts.lift ?? 0)
+  const px: Px[] = []
+  for (let x = 2; x <= 9; x++) for (let y = y0; y <= y0 + 4; y++) px.push([x, y, CLAY])
+  // A blink closes each two-pixel eye to one pixel, low.
+  if (opts.blink) px.push([4, y0 + 2, EYE], [7, y0 + 2, EYE])
+  else px.push([4, y0 + 1, EYE], [4, y0 + 2, EYE], [7, y0 + 1, EYE], [7, y0 + 2, EYE])
+  const claws = opts.claws ?? 'side'
+  if (claws === 'side') px.push([1, y0 + 2, CLAY], [10, y0 + 2, CLAY])
+  if (claws === 'down') px.push([1, y0 + 3, CLAY], [10, y0 + 3, CLAY])
+  if (claws === 'up') px.push([1, y0, CLAY], [1, y0 - 1, CLAY], [10, y0, CLAY], [10, y0 - 1, CLAY])
+  if (claws === 'wave') px.push([1, y0 + 2, CLAY], [10, y0, CLAY], [11, y0 - 1, CLAY])
+  if (claws === 'eat') px.push([1, y0 + 2, CLAY], [10, y0 + 3, CLAY])
+  if ((opts.legs ?? 'stand') === 'stand') for (const x of [3, 5, 6, 8]) px.push([x, y0 + 5, CLAY])
+  else for (const x of [3, 8]) px.push([x, y0 + 5, CLAY])
+  if (opts.prop === 'laptop') for (let x = 3; x <= 8; x++) px.push([x, 8, x === 3 || x === 8 ? STEEL : SCREEN])
+  if (opts.prop === 'bar') for (let x = 0; x <= 11; x++) px.push([x, y0 - 2, x <= 1 || x >= 10 ? STEEL : '#77756e'])
+  if (opts.prop === 'cookie') px.push([10, y0 + 1, COOKIE], [11, y0 + 1, COOKIE], [10, y0 + 2, CHIP], [11, y0 + 2, COOKIE])
+  if (opts.prop === 'crumb') px.push([10, y0 + 2, COOKIE], [11, y0 + 4, COOKIE])
+  return px
+}
+
+/** The 12-pose loop: working at a laptop, a blink, jumping, lifting a bar, a cookie break, a wave. */
+export const CREW_POSES: ReadonlyArray<Px[]> = [
+  pose({ claws: 'down', prop: 'laptop' }),
+  pose({ claws: 'side', prop: 'laptop' }),
+  pose({ claws: 'down', prop: 'laptop' }),
+  pose({ claws: 'down', prop: 'laptop', blink: true }),
+  pose({ lift: 1, claws: 'up', legs: 'tuck' }),
+  pose({ claws: 'side' }),
+  pose({ lift: 1, claws: 'up', legs: 'tuck' }),
+  pose({ claws: 'up', prop: 'bar' }),
+  pose({ lift: 1, claws: 'up', prop: 'bar' }),
+  pose({ claws: 'eat', prop: 'cookie' }),
+  pose({ claws: 'eat', prop: 'crumb', blink: true }),
+  pose({ claws: 'wave' }),
+]
+
+/** A square key holding the mascot, its 12 poses swapped every 0.2s in a loop (SMIL, no script). */
+export function crewKeySvg(k: { edge: string; bg: string; hover?: boolean; running?: number }): { svg: string; width: number } {
+  const h = KEY_H
+  const w = KEY_H + 10
+  const cell = 2
+  const ox = Math.round((w - 12 * cell) / 2)
+  const oy = Math.round((h - 9 * cell) / 2)
+  const n = CREW_POSES.length
+  const dur = (n * 0.2).toFixed(1)
+  const keyTimes = Array.from({ length: n }, (_, i) => (i / n).toFixed(4)).join(';')
+  const frames = CREW_POSES.map((px, i) => {
+    const values = Array.from({ length: n }, (_, j) => (j === i ? 1 : 0)).join(';')
+    const rects = px.map(([x, y, c]) => `<rect x="${ox + x * cell}" y="${oy + y * cell}" width="${cell}" height="${cell}" fill="${c}"/>`).join('')
+    return `<g opacity="${i === 0 ? 1 : 0}"><animate attributeName="opacity" values="${values}" keyTimes="${keyTimes}" dur="${dur}s" calcMode="discrete" repeatCount="indefinite"/>${rects}</g>`
+  })
+  const glow = k.hover ? 0.95 : 0.55
+  const badge = k.running && k.running > 0
+    ? `<circle cx="${w - 8}" cy="8" r="6" fill="#ff4d5e"/><text x="${w - 8}" y="11" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff" font-family="${SANS}">${Math.min(9, k.running)}</text>`
+    : ''
+  return {
+    svg: [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`,
+      `<defs><filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>`,
+      `<rect x="3" y="3" width="${w - 6}" height="${h - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="${glow}" filter="url(#g)" shape-rendering="auto"/>`,
+      `<rect x="3.5" y="3.5" width="${w - 7}" height="${h - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2" shape-rendering="auto"/>`,
+      ...frames,
+      badge,
+      `</svg>`,
+    ].join(''),
+    width: w,
+  }
 }

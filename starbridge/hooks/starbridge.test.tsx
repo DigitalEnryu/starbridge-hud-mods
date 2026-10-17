@@ -267,3 +267,15 @@ test('desktop keys are glowing images with a click area over them; hover brighte
   expect(await keyArt()).toContain('opacity="0.55"')
   await ui.unmount()
 })
+
+test('the mascot key animates 12 poses and opens the agents panel when clicked', async ($, on) => {
+  const w = world(on, { tokens: 120000 })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const art = (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === 'Agents panel')
+  expect(art?.props.isInteractive).toBe(true)
+  expect((String(art?.props.source).match(/<animate /g) ?? []).length).toBe(12)
+  await click(ui as never, 'starbridge-crew')
+  expect(w.commands).toEqual(['agents-info'])
+  await ui.unmount()
+})

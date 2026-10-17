@@ -12,7 +12,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  DARK, extractResume, GAUGE_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  crewKeySvg, DARK, extractResume, GAUGE_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
   LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, tilesSvg, TTL_MS,
 } from './logic'
 import type { Tile } from './logic'
@@ -131,6 +131,15 @@ async function toggleWarm($: EngineInterface): Promise<void> {
 }
 
 // ---- Handover and end session ----------------------------------------------------------------
+
+/** The mascot key: opens the agents panel (Savvy Progress's /agents-info) to the front. */
+async function openCrew($: EngineInterface): Promise<void> {
+  try {
+    await $.command.run({ command: 'agents-info', args: 'open' })
+  } catch {
+    void $.ui.toast('The agents panel needs the Savvy Progress mod.')
+  }
+}
 
 async function startRun($: EngineInterface, mode: 'handover' | 'end'): Promise<void> {
   const isHandover = mode === 'handover'
@@ -372,6 +381,7 @@ export const register: Register = on => {
     else if (action === 'send') void sendHeld($)
     else if (action === 'edit') void editHeld($)
     else if (action === 'drop') void dropHeld($)
+    else if (action === 'crew') void openCrew($)
     return next(e)
   })
 
@@ -435,6 +445,7 @@ export const register: Register = on => {
       <Button key="starbridge-handover" label="▶ Handover" onPress={() => void startRun($, 'handover')} />
     )
     const end = busy ? null : <Button key="starbridge-end" label="■ End session" onPress={() => void startRun($, 'end')} />
+    const crew = <Button key="starbridge-crew" label="👾 Agents" onPress={() => void openCrew($)} />
     const running = busy ? <Text color={p.hot}>{busy}</Text> : null
     const cancelRun = busy ? <Button key="starbridge-run-cancel" label="✕" plain onPress={() => update($, view, prev => ({ ...prev, run: IDLE_RUN }))} /> : null
     const tiles = tilesOf(v, now)
@@ -472,6 +483,20 @@ export const register: Register = on => {
         const heightOf = (_spec: DeckSpec) => 1
         // Outlined keys are images (outline and glow drawn crisp at chip height) with an invisible
         // click area laid over them; flat keys are drawn by the button module itself.
+        // The mascot key: a square of its own, the 12-pose loop animating inside (an interactive Svg
+        // runs SMIL), with the same invisible click area laid over it.
+        const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', hover: hovered === 'crew' })
+        const crewCells = Math.ceil(crewArt.width / 8)
+        const crewKey = flat ? (
+          <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
+        ) : (
+          <Box key="starbridge-crew-key" position="relative">
+            <Svg source={crewArt.svg} alt="Agents panel" width={crewArt.width} height={KEY_H} isInteractive />
+            <Box position="absolute" top={0} left={0}>
+              <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width={crewCells} height={1} />
+            </Box>
+          </Box>
+        )
         const deckKey = (spec: DeckSpec) => {
           if (flat || !spec.edge) {
             return <Client key={spec.key} module="./deck-button.ts" props={spec} width={widthOf(spec)} height={heightOf(spec)} />
@@ -497,6 +522,7 @@ export const register: Register = on => {
               <Box flexGrow={1} />
               {running}
               {cancelRun}
+              {crewKey}
               {specs.map(deckKey)}
             </Box>
             {hold ? <Svg source={holdCardSvg(width, hold, p)} alt={`Message on hold. Send now ${fmtUsd(hold.coldUsd)}, a warm turn ${fmtUsd(hold.warmUsd)}.`} width={width} height={132} /> : null}
@@ -518,6 +544,7 @@ export const register: Register = on => {
           <Box flexDirection="row" alignItems="center" gap={1}>
             {strip ? <Svg source={strip.svg} alt={tiles.map(t => `${t.label} ${t.value}`).join(', ')} width={strip.width} height={TILE_H} /> : null}
             <Box flexGrow={1} />
+            {crew}
             {flame}
             {running}
             {cancelRun}
@@ -539,6 +566,7 @@ export const register: Register = on => {
         <Box flexDirection="row" gap={1}>
           <Text color={ratio >= 0.5 ? p.hot : p.calm}>{gaugeText(v.percent, barCells)}</Text>
           <Text bold>{v.percent === null ? 'n/a' : `${v.percent}%`}</Text>
+          {crew}
           {flame}
           {running}
           {cancelRun}
