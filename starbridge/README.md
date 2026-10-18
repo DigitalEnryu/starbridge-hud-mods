@@ -14,10 +14,12 @@ The command deck above your Claude Code prompt. One band, three jobs:
   - 🔥 **Keep warm.** Off in every new session. On, it sends a one-word ping about every 50 idle
     minutes so the one-hour prompt cache never goes cold. Shows how often it kept you warm and what
     that cost.
-  - **Handover.** Asks first, then runs your `handover` skill. When the skill prints its resume prompt
+  - **Handover.** Grey until the context passes the 50% line, then green and pulsing: your cue to
+    press it. Asks first, then runs your `handover` skill. When the skill prints its resume prompt
     and the line "Run /clear, paste this in the new session", Starbridge runs `/clear` and sends the
     resume prompt into the fresh session for you.
-  - **End session.** Asks first, then runs `end session`. No `/clear`.
+  - **End session.** Grey at rest; under the pointer it turns white with a red stop. Asks first,
+    then runs `end session`. No `/clear`.
 
 When you send a message after the cache went cold, and the context is over 50k tokens, Starbridge
 holds it once and shows what sending it now costs against a warm turn: **Send**, **Edit message**,

@@ -374,8 +374,9 @@ test('a key takes exactly its face: sparks and the jumping mascot hang above it,
     expect(inFlow.map(k => [k.type, k.props?.height])).toEqual([['Svg', KEY_H]])
     // The art and its glow hang from the face's bottom edge, out of the flow: face height, or taller
     // where the art reaches up (sparks, the jumping mascot).
+    // End session adds a third: the layer that turns it white and red under the pointer.
     const hung = kids.filter(k => k.props?.position === 'absolute' && k.props?.bottom === 0 && k.props?.top === undefined)
-    expect(hung.length).toBe(2)
+    expect(hung.length).toBe(key === 'starbridge-end-key' ? 3 : 2)
     for (const k of hung) {
       expect([KEY_H, KEY_CANVAS_H]).toContain(((k as { children?: Node[] }).children ?? [])[0]?.props?.height)
     }
@@ -398,6 +399,76 @@ test('Keep warm on: the flame burns red to gold and throws sparks above the key;
   }
   expect(out.svg).not.toContain('<animate')
   expect(out.svg).not.toContain('spark')
+})
+
+test('a pulsing key breathes its glow and plays; a still one does not', () => {
+  const base = { glyph: '▶', label: 'Handover', fg: '#f4f3ee', bg: '#0f2219', edge: '#2bf0a8' }
+  const pulsing = keySvg({ ...base, pulse: true })
+  const still = keySvg(base)
+  expect(pulsing.isAnimated).toBe(true)
+  expect(pulsing.svg).toMatch(/<animate attributeName="opacity" values="0;0.6;0"/)
+  expect(still.isAnimated).toBe(false)
+  expect(still.svg).not.toContain('<animate')
+  expect(pulsing.width).toBe(still.width)
+  expect(pulsing.height).toBe(KEY_H)
+})
+
+const artOf = async (ui: { findAll: (q: { type: string }) => Promise<Array<{ props: Record<string, unknown> }>> }, alt: string) =>
+  (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === alt)!
+
+test('Handover sits grey like Keep warm off below the 50% line, and turns green and pulses past it', async ($, on) => {
+  world(on, { tokens: 370000 })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const grey = await artOf(ui as never, '▶ Handover')
+  expect(String(grey.props.source)).toContain('stroke="#5d5c57"')
+  expect(String(grey.props.source)).not.toContain('#2bf0a8')
+  expect(String(grey.props.source)).not.toContain('#ff4d5e')
+  expect(String(grey.props.source)).not.toContain('<animate')
+  // Always a frame, lit or not, so crossing the line never swaps an image for a frame.
+  expect(grey.props.isInteractive).toBe(true)
+  await ui.unmount()
+
+  await $.command.run({ command: 'starbridge', args: 'preview 50' } as never)
+  const lit = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const green = await artOf(lit as never, '▶ Handover')
+  expect(String(green.props.source)).toContain('stroke="#2bf0a8"')
+  expect(String(green.props.source)).toContain('fill="#ff4d5e"')
+  expect(String(green.props.source)).toMatch(/<animate attributeName="opacity" values="0;0.6;0"/)
+  expect(green.props.isInteractive).toBe(true)
+  expect(green.props.width).toBe(grey.props.width)
+  expect(String((await artOf(lit as never, '▶ Handover glow')).props.source)).toContain('#8dffd6')
+  await lit.unmount()
+})
+
+test('End session sits grey; under the pointer it turns white with a red stop inside 90ms, and its art never changes', async ($, on) => {
+  const w = world(on, { tokens: 120000 })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const src = async (alt: string) => String((await artOf(ui as never, alt)).props.source)
+  const opacityOf = (svg: string) => Number(svg.match(/<g opacity="([\d.]+)"/)![1])
+  const art = await src('■ End session')
+  expect(art).toContain('stroke="#5d5c57"')
+  expect(art).not.toContain('#ffffff')
+  expect(art).not.toContain('#ff4d5e')
+  expect(opacityOf(await src('■ End session hover'))).toBe(0)
+  expect(await src('■ End session glow')).toContain('stroke="#a9a79f"')
+
+  await ui.post({ hover: 'end' }, { in: 'starbridge-end' })
+  await w.clock.advance(90)
+  const hover = await src('■ End session hover')
+  expect(opacityOf(hover)).toBe(1)
+  expect(hover).toContain('stroke="#ffffff"')
+  expect(hover).toMatch(/fill="#ff4d5e"[^>]*>■</)
+  expect(await src('■ End session glow')).toContain('stroke="#ffffff"')
+  expect(await src('■ End session')).toBe(art)
+
+  await ui.post({ hover: null }, { in: 'starbridge-end' })
+  await w.clock.advance(600)
+  expect(opacityOf(await src('■ End session hover'))).toBe(0)
+  expect(await src('■ End session glow')).toContain('stroke="#a9a79f"')
+  expect(await src('■ End session')).toBe(art)
+  await ui.unmount()
 })
 
 // A mascot file of the person's own: 50 wide, taller than the key, its animation inside.

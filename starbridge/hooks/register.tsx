@@ -12,7 +12,7 @@ import type { EngineInterface, Register, RenderNode } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, glowSvg, GLOW_LIT, GLOW_REST, KEY_H, keySvg, MASCOT_MAX, mascotOf, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, glowSvg, GLOW_LIT, GLOW_REST, hoverSvg, KEY_H, keySvg, MARK, MASCOT_MAX, mascotOf, mixHex, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
   LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, shortened, stripWidth, tilesSvg, TTL_MS,
 } from './logic'
 import type { Mascot, Tile } from './logic'
@@ -57,19 +57,31 @@ let glowTimer: { cancel: () => void } | null = null
 let mascot: Mascot | null = null
 const GLOW_TICK_MS = 30
 const GLOW_IN_STEP = 0.2 // full in 150ms
+const GLOW_IN_FAST = 0.34 // full in 60ms: End session wakes the moment the pointer arrives
 const GLOW_OUT_STEP = 0.125 // back to rest in 240ms
+const FAST_IN = new Set(['end'])
 
 type DeckSpec = {
   key: string; action: string; glyph?: string; glyphColor?: string; label: string
   fg: string; bg: string; hoverBg: string; edge?: string; hoverEdge?: string
+  /** Breathe the glow: the key is asking to be pressed. */
+  pulse?: boolean
+  /** The glow's colour at rest, fading to `hoverEdge` under the pointer; without it the glow is `hoverEdge` throughout. */
+  restGlow?: string
+  /** What the key turns into under the pointer, on a layer over its art: outline and glyph colours. */
+  hover?: { edge: string; glyphColor: string }
 }
 
 // The deck's keys: outlined so they read as things to press, apart from the information chips.
 const RED = '#ff4d5e'
-const KEY_HANDOVER = { glyph: '▶', glyphColor: RED, fg: '#f4f3ee', bg: '#0f2219', hoverBg: '#153526', edge: '#2bf0a8', hoverEdge: '#8dffd6' }
-const KEY_STOP = { glyph: '■', glyphColor: '#ffffff', fg: '#f4f3ee', bg: '#222220', hoverBg: '#2e2e2b', edge: '#a9a79f', hoverEdge: '#ffffff' }
+const GREY_GLYPH = '#8f8d86'
 const KEY_GOLD = { fg: '#ffc93c', bg: '#2b2208', hoverBg: '#3d300b', edge: '#ffc93c', hoverEdge: '#ffe08a' }
 const KEY_QUIET = { fg: '#c9c7bf', bg: '#222220', hoverBg: '#2e2e2b', edge: '#5d5c57', hoverEdge: '#a9a79f' }
+// Handover rests grey, like Keep warm off, until the context passes the 50% line; then it goes green and pulses.
+const KEY_HANDOVER = { glyph: '▶', glyphColor: RED, fg: '#f4f3ee', bg: '#0f2219', hoverBg: '#153526', edge: '#2bf0a8', hoverEdge: '#8dffd6', pulse: true }
+const KEY_HANDOVER_REST = { glyph: '▶', glyphColor: GREY_GLYPH, ...KEY_QUIET }
+// End session rests grey and wakes only under the pointer: a white outline and glow, and a red stop.
+const KEY_STOP = { glyph: '■', glyphColor: GREY_GLYPH, ...KEY_QUIET, hoverEdge: '#ffffff', restGlow: KEY_QUIET.hoverEdge, hover: { edge: '#ffffff', glyphColor: RED } }
 
 /** Cells a label takes: an emoji is two wide. */
 function cellsOf(label: string): number {
@@ -97,7 +109,7 @@ function stepGlow($: EngineInterface): void {
     const target = hovered === action ? 1 : 0
     const at = glowLevel[action] ?? 0
     if (at === target) continue
-    const next = target > at ? Math.min(1, at + GLOW_IN_STEP) : Math.max(0, at - GLOW_OUT_STEP)
+    const next = target > at ? Math.min(1, at + (FAST_IN.has(action) ? GLOW_IN_FAST : GLOW_IN_STEP)) : Math.max(0, at - GLOW_OUT_STEP)
     glowLevel[action] = Math.round(next * 1000) / 1000
     if (glowLevel[action] !== target) isMoving = true
   }
@@ -567,7 +579,7 @@ export const register: Register = on => {
         const specs: DeckSpec[] = [
           key({ key: 'starbridge-warm', action: 'warm', glyph: '🔥', label: v.warmOn ? 'On' : 'Off', ...(v.warmOn ? KEY_GOLD : KEY_QUIET) }),
           ...(busy ? [] : [
-            key({ key: 'starbridge-handover', action: 'handover', label: 'Handover', ...KEY_HANDOVER }),
+            key({ key: 'starbridge-handover', action: 'handover', label: 'Handover', ...(v.percent !== null && v.percent >= MARK * 100 ? KEY_HANDOVER : KEY_HANDOVER_REST) }),
             key({ key: 'starbridge-end', action: 'end', label: 'End session', ...KEY_STOP }),
           ]),
         ]
@@ -588,7 +600,7 @@ export const register: Register = on => {
         // restarts: hover fades the glow layer alone (stepGlow). Keys never shrink: chips give way (stripOf).
         const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', mascot })
         const crewCells = Math.ceil(crewArt.width / 8)
-        const pressable = (o: { key: string; action: string; alt: string; art: { svg: string; width: number; height: number }; isInteractive: boolean; glow: string; hit: RenderNode }) => (
+        const pressable = (o: { key: string; action: string; alt: string; art: { svg: string; width: number; height: number }; isInteractive: boolean; glow: string; over?: string; hit: RenderNode }) => (
           <Box key={`${o.key}-key`} position="relative" flexShrink={0}>
             <Svg key={`${o.key}-place`} source={blankSvg(o.art.width, KEY_H)} alt={`${o.alt} key`} width={o.art.width} height={KEY_H} />
             <Box position="absolute" bottom={0} left={0}>
@@ -597,6 +609,11 @@ export const register: Register = on => {
             <Box position="absolute" bottom={0} left={0}>
               <Svg key={`${o.key}-art`} source={o.art.svg} alt={o.alt} width={o.art.width} height={o.art.height} isInteractive={o.isInteractive} />
             </Box>
+            {o.over ? (
+              <Box position="absolute" bottom={0} left={0}>
+                <Svg key={`${o.key}-hover`} source={o.over} alt={`${o.alt} hover`} width={o.art.width} height={o.art.height} />
+              </Box>
+            ) : null}
             <Box position="absolute" top={0} bottom={0} left={0} right={0}>
               {o.hit}
             </Box>
@@ -612,7 +629,7 @@ export const register: Register = on => {
         const artOf = (spec: DeckSpec) => {
           const isWarm = spec.action === 'warm'
           return keySvg({
-            glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg, edge: spec.edge!,
+            glyph: spec.glyph, glyphColor: spec.glyphColor, label: spec.label, fg: spec.fg, bg: spec.bg, edge: spec.edge!, pulse: spec.pulse,
             ...(isWarm ? { sizeAs: 'Off', flame: v.warmOn ? 'on' as const : 'off' as const } : {}),
           })
         }
@@ -622,10 +639,16 @@ export const register: Register = on => {
           }
           const art = artOf(spec)
           const cells = Math.ceil(art.width / 8)
-          // Keep warm is always a frame, lit or not, so switching it never swaps an image for a frame.
+          // Keep warm and Handover are always frames, lit or not, so switching never swaps an image for a frame.
+          const level = glowLevel[spec.action] ?? 0
+          const lit = spec.hoverEdge ?? spec.edge
           return pressable({
             key: spec.key, action: spec.action, alt: spec.glyph ? `${spec.glyph} ${spec.label}` : spec.label, art,
-            isInteractive: spec.action === 'warm' || art.isAnimated, glow: spec.hoverEdge ?? spec.edge,
+            isInteractive: spec.action === 'warm' || spec.action === 'handover' || art.isAnimated,
+            glow: spec.restGlow ? mixHex(spec.restGlow, lit, level) : lit,
+            over: spec.hover && spec.glyph
+              ? hoverSvg({ width: art.width, height: art.height, glyph: spec.glyph, glyphX: art.glyphX, glyphColor: spec.hover.glyphColor, edge: spec.hover.edge, opacity: level })
+              : undefined,
             hit: <Client key={spec.key} module="./deck-button.ts" props={{ ...spec, ghost: true, cells }} width="100%" height="100%" />,
           })
         }

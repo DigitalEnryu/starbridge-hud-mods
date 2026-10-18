@@ -255,6 +255,8 @@ export type KeyArt = {
   flame?: 'on' | 'off'
   /** Draw `KEY_TOP` of headroom above the face (for sparks). Defaults to on for a flame key. */
   headroom?: boolean
+  /** Breathe the glow slowly, as a lit flame does: a key asking to be pressed. */
+  pulse?: boolean
 }
 
 /** An empty drawing: what holds a key's place in the row while its art hangs over it. */
@@ -325,18 +327,40 @@ export function glowSvg(g: { width: number; height: number; color: string; opaci
   ].join('')
 }
 
+/** A colour `t` of the way from `a` to `b`, both `#rrggbb`. */
+export function mixHex(a: string, b: string, t: number): string {
+  const ch = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16)
+  return '#' + [0, 1, 2].map(i => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * What a key turns into under the pointer, drawn on a layer over its art: a crisp `edge` outline and the
+ * glyph again in `glyphColor`, at `opacity`. Fading this layer changes the key without redrawing its art.
+ */
+export function hoverSvg(o: { width: number; height: number; glyph: string; glyphX: number; glyphColor: string; edge: string; opacity: number }): string {
+  const top = o.height - KEY_H
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${o.width}" height="${o.height}" viewBox="0 0 ${o.width} ${o.height}">`,
+    `<g opacity="${o.opacity}">`,
+    `<rect x="3.5" y="${top + 3.5}" width="${o.width - 7}" height="${KEY_H - 7}" rx="7.5" fill="none" stroke="${o.edge}" stroke-width="1.2"/>`,
+    `<text x="${o.glyphX}" y="${top + 19.5}" font-size="12" fill="${o.glyphColor}" font-family="Segoe UI Symbol, Segoe UI Emoji, sans-serif">${xml(o.glyph)}</text>`,
+    `</g></svg>`,
+  ].join('')
+}
+
 /**
  * A pressable key as an image: a rounded fill and a crisp outline, with `KEY_TOP` of headroom above when
  * `headroom` says so (`height` is then KEY_CANVAS_H, else KEY_H). Its glow is a separate layer (glowSvg).
- * `isAnimated` says the drawing moves, so it needs an interactive Svg to play.
+ * `isAnimated` says the drawing moves, so it needs an interactive Svg to play. `glyphX` is where the
+ * glyph sits, for a hover layer that redraws it (hoverSvg).
  */
-export function keySvg(k: KeyArt): { svg: string; width: number; height: number; isAnimated: boolean } {
+export function keySvg(k: KeyArt): { svg: string; width: number; height: number; isAnimated: boolean; glyphX: number } {
   const markW = k.flame ? FLAME_W + 6 : k.glyph ? (k.glyph.codePointAt(0)! >= 0x1f000 ? 16 : 11) + 6 : 0
   const w = 3 + 8 + markW + textWidth(k.sizeAs ?? k.label) + 8 + 3
   const top = (k.headroom ?? Boolean(k.flame)) ? KEY_TOP : 0
   const h = top + KEY_H
-  const lit = k.flame === 'on'
-  // A lit key adds a slow breath of extra glow over the glow layer.
+  const lit = k.flame === 'on' || Boolean(k.pulse)
+  // A lit or pulsing key adds a slow breath of extra glow over the glow layer.
   const breathe = lit
     ? `<rect x="3" y="${top + 3}" width="${w - 6}" height="${KEY_H - 6}" rx="8" fill="none" stroke="${k.edge}" stroke-width="2.5" opacity="0" filter="url(#g)"><animate attributeName="opacity" values="0;0.6;0" dur="2.4s" repeatCount="indefinite"/></rect>`
     : ''
@@ -348,6 +372,7 @@ export function keySvg(k: KeyArt): { svg: string; width: number; height: number;
   ]
   // The mark and label sit centred, so a shorter label than `sizeAs` leaves even space both sides.
   let x = Math.round((w - markW - textWidth(k.label)) / 2)
+  const glyphX = x
   if (k.flame) {
     parts.push(flameSvg(k.flame, x + FLAME_W / 2, top + 21))
     x += markW
@@ -356,7 +381,7 @@ export function keySvg(k: KeyArt): { svg: string; width: number; height: number;
     x += markW
   }
   parts.push(`<text x="${x}" y="${top + 19.5}" font-size="13" font-weight="600" fill="${k.fg}" font-family="${SANS}">${xml(k.label)}</text>`, `</svg>`)
-  return { svg: parts.join(''), width: w, height: h, isAnimated: lit }
+  return { svg: parts.join(''), width: w, height: h, isAnimated: lit, glyphX }
 }
 
 // ---- The crew key: a pixel mascot that loops through 12 poses --------------------------------
