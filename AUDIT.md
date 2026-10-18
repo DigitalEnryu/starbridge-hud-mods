@@ -42,3 +42,9 @@ No MCP servers, no command hooks, no install scripts in any manifest.
 | Cache Tax | Safe, notes | Author's marketplace entry is unpinned. Keep-warm pings cost plan usage. Auto-arms 3h after a cold miss |
 | Blast Radius | Safe, notes | Heuristic, not a sandbox. Migration listers run project code before approval. Needs Git Bash on this machine |
 | Reflect | Safe, notes | Prompt + reply tail go to Haiku. `HOME` unset on Windows breaks the global save path. Global CLAUDE.md is a sync target |
+
+## Removals
+
+| Mod | Removed | Why |
+|---|---|---|
+| Blast Radius | 2026-10-18 | Dropped from the package at the maintainer's request (too intrusive in daily use). Its rows above are kept as the record of what was audited |

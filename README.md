@@ -7,7 +7,7 @@ A command deck above your Claude Code prompt, plus the community mods it works w
 ```
 
 Type that in Claude Code (2.1.287 or newer), then start a new session or run `/reload-plugins`. Installing Starbridge
-also installs the four mods below it.
+also installs the three mods below it.
 
 ## What you get
 
@@ -15,7 +15,6 @@ also installs the four mods below it.
 |---|---|---|
 | **Starbridge HUD** | Context gauge with a 50% handover notch, live cost chips, Keep warm toggle, cold-cache hold card, animated agents key, one-click Handover and End session | DigitalEnryu (MIT) |
 | **Savvy Progress** | The agents panel: every subagent's model, progress, context, cost and time. Starbridge's mascot key opens it | JohnnyVizz (MIT, unmodified) |
-| **Blast Radius** | Holds risky shell commands (`rm -rf`, force pushes, resets) and lists exactly what they would change before you approve | Anthropic (Apache-2.0), with Windows fixes |
 | **Reflect** | Spots corrections like "no, use pnpm" and offers to save them as a rule in your repo's `CLAUDE.md` | Bayram Annakov (MIT), with a Windows fix and global saves off by default |
 | **Filetree** | Your project's file tree beside the chat, lighting up as Claude works. Terminal only (`/tui fullscreen`, 110+ columns) | Kurt Buhler (MIT, unmodified) |
 
@@ -50,7 +49,8 @@ made-up figures; `preview off` to return), `/starbridge buttons custom|flat|nati
 
 ## Notes
 
-- **Windows:** Blast Radius needs Git Bash installed; it finds it at its default path.
+- **Blast Radius was removed on 2026-10-18.** Installed it from here before then? Remove it with
+  `/plugin uninstall blast-radius@starbridge-hud`. New installs no longer include it.
 - **Mods run with your permissions.** Every third-party mod here was source-audited before inclusion; see
   [AUDIT.md](AUDIT.md). Vendored copies are listed in [vendor/README.md](vendor/README.md), forks carry a `CHANGES.md`.
 - **Remove everything:** `/plugin uninstall starbridge@starbridge-hud`, then the same for each mod above.
@@ -67,7 +67,7 @@ Things learned building Starbridge that the docs do not spell out. Checked on Cl
 - In the desktop app a session starts before any surface attaches, so decide whether you have a band on the first
   `ui.render`, not in `session.start`.
 - `"dependencies"` in a plugin's `plugin.json` makes one install pull in other plugins from the same marketplace.
-  That is how this repo installs five mods with one command.
+  That is how this repo installs four mods with one command.
 
 **Drawing on the desktop**
 

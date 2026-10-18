@@ -5,7 +5,6 @@
   "plugins": [
     { "name": "starbridge", "source": "./starbridge", "description": "Starbridge HUD: context gauge, live cost chips, Keep warm, cold-cache hold card, animated agents key, one-click Handover and End session" },
     { "name": "savvy-progress", "source": "./vendor/savvy-progress", "description": "Savvy Progress by JohnnyVizz (MIT, unmodified): the agents panel Starbridge's mascot key opens" },
-    { "name": "blast-radius", "source": "./forks/blast-radius", "description": "Blast Radius by Anthropic (Apache-2.0), with Windows fixes: holds risky commands and shows what they would delete" },
     { "name": "reflect-mod", "source": "./forks/reflect-mod", "description": "Reflect by Bayram Annakov (MIT), with a Windows home-path fix and global saves off by default: turns your corrections into saved rules" },
     { "name": "filetree", "source": "./vendor/filetree", "description": "Filetree by Kurt Buhler (MIT, unmodified): your project's file tree beside the chat. Terminal only" }
   ]
