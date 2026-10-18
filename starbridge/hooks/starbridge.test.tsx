@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import DeckButton from './deck-button'
-import { coldUsd, crewKeySvg, DARK, extractResume, gaugeSvg, gaugeText, holdCardSvg, isRunLive, KEY_CANVAS_H, KEY_H, KEY_TOP, keySvg, priceOf, RUN_MAX_MS, warmUsd } from './logic'
+import { coldUsd, crewKeySvg, DARK, extractResume, gaugeSvg, gaugeText, holdCardSvg, isRunLive, KEY_CANVAS_H, KEY_H, KEY_TOP, keySvg, mascotOf, priceOf, RUN_MAX_MS, warmUsd } from './logic'
 
 const PLUGIN = 'starbridge'
 
@@ -35,7 +35,9 @@ const HANDOVER_ANSWER = [
   "Run /clear, paste this in the new session, and you're back where we left off.",
 ].join('\n')
 
-type Opts = { tokens?: number; fork?: Array<{ read: number; write: number }>; ask?: string }
+const MASCOT_PATH = 'C:\\Users\\Pat\\.claude\\starbridge\\mascot.svg'
+
+type Opts = { tokens?: number; fork?: Array<{ read: number; write: number }>; ask?: string; mascot?: string }
 
 function world(on: On, opts: Opts = {}) {
   const clock = mock.clock(on, { now: START })
@@ -45,6 +47,15 @@ function world(on: On, opts: Opts = {}) {
   const filled: string[] = []
   const forks: number[] = []
   const answers = [...(opts.fork ?? [])]
+  const read: string[] = []
+  const toasts: string[] = []
+  // A made-up home, never the real one: its mascot file exists only when a test hands one in.
+  on('env.get', async ($, e) => ({ value: e.name === 'USERPROFILE' ? 'C:\\Users\\Pat' : undefined }) as never)
+  on('fs.read', async ($, e) => {
+    read.push(e.path)
+    if (opts.mascot && e.path.replace(/\//g, '\\') === MASCOT_PATH) return { value: opts.mascot } as never
+    throw new Error(`ENOENT: ${e.path}`)
+  })
   on('session.start', async ($, e) => ({ cwd: e.cwd }) as never)
   on('session.usage', async () => ({ value: { startedAt: START, context: { window: 1000000, tokens: opts.tokens, percent: opts.tokens ? Math.round(opts.tokens / 10000) : undefined }, rateLimits: [], cost: { usd: 4.12 } } }) as never)
   on('session.model', async () => ({ value: 'Opus 5.5' }) as never)
@@ -64,7 +75,10 @@ function world(on: On, opts: Opts = {}) {
     return { text: '' } as never
   })
   on('classic.SessionStart', async () => ({}) as never)
-  on('ui.toast', async () => ({ value: undefined }) as never)
+  on('ui.toast', async ($, e) => {
+    toasts.push(String((e as { text?: unknown }).text ?? JSON.stringify(e)))
+    return { value: undefined } as never
+  })
   on('ui.render', async () => ({ type: 'Box', props: {}, children: [] }) as never)
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e) => {
     const q = (e as { questions: { question: string }[] }).questions[0].question
@@ -75,7 +89,7 @@ function world(on: On, opts: Opts = {}) {
     const a = answers.shift() ?? { read: 0, write: 100000 }
     return { value: { isAnswered: true, text: 'warm', usage: { input_tokens: 2, output_tokens: 1, cache_read_input_tokens: a.read, cache_creation_input_tokens: a.write } } } as never
   })
-  return { clock, submitted, commands, filled, forks }
+  return { clock, submitted, commands, filled, forks, read, toasts }
 }
 
 const start = ($: Engine) => $.session.start({ source: 'startup', cwd: '/w', surface: 'desktop', isInteractive: true } as never)
@@ -384,6 +398,79 @@ test('Keep warm on: the flame burns red to gold and throws sparks above the key;
   }
   expect(out.svg).not.toContain('<animate')
   expect(out.svg).not.toContain('spark')
+})
+
+// A mascot file of the person's own: 50 wide, taller than the key, its animation inside.
+const MASCOT = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="50" height="60" viewBox="0 0 173 207"><g id="own-mascot"><animate attributeName="opacity" values="1;0.5" dur="2s" repeatCount="indefinite"/></g></svg>'
+
+test('a mascot file reads as markup to nest and its height; anything else is refused', () => {
+  const m = mascotOf(MASCOT)
+  expect(m?.height).toBe(60)
+  expect(m?.svg.startsWith('<svg')).toBe(true)
+  expect(m?.svg).toContain('own-mascot')
+  expect(mascotOf('not an image')).toBe(null)
+  expect(mascotOf('<svg width="50" height="20"></svg>')).toBe(null)
+  expect(mascotOf('<svg width="50"></svg>')).toBe(null)
+})
+
+test('/starbridge mascot re-reads the file, so a new mascot shows without reloading the plugin', async ($, on) => {
+  const opts: Opts = { tokens: 120000 }
+  world(on, opts)
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const art = async () => String((await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === 'Agents panel')?.props.source)
+  expect(await art()).not.toContain('own-mascot')
+  opts.mascot = MASCOT
+  expect((await $.command.run({ command: 'starbridge', args: 'mascot' } as never)).text).toMatch(/mascot\.svg/)
+  expect(await art()).toContain('own-mascot')
+  opts.mascot = undefined
+  expect((await $.command.run({ command: 'starbridge', args: 'mascot' } as never)).text).toMatch(/pixel crew/)
+  expect(await art()).not.toContain('own-mascot')
+  await ui.unmount()
+})
+
+test('a mascot too big for the engine is refused, so the band never vanishes: the crew stays and a toast says why', async ($, on) => {
+  // The engine refuses any Svg source over 131072 characters, and with it the whole band.
+  const huge = MASCOT.replace('<g id="own-mascot">', `<g id="own-mascot"><desc>${'x'.repeat(131072)}</desc>`)
+  expect(mascotOf(huge)).toBe(null)
+  const w = world(on, { tokens: 120000, mascot: huge })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const art = (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === 'Agents panel')
+  expect(String(art?.props.source)).not.toContain('own-mascot')
+  expect((String(art?.props.source).match(/<animate /g) ?? []).length).toBe(12)
+  expect(w.toasts.some(t => t.includes('mascot.svg') && t.includes('128 KB'))).toBe(true)
+  await ui.unmount()
+})
+
+test('with a mascot the agents key grows upward: its face stays at the bottom and the mascot is drawn over it', () => {
+  const art = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', mascot: mascotOf(MASCOT)! })
+  expect(art.height).toBe(60)
+  expect(art.svg).toMatch(/^<svg [^>]*width="50" height="60" viewBox="0 0 50 60"/)
+  const face = art.svg.match(/<rect x="3.5" y="([\d.]+)" width="43" height="23" rx="7.5"/)
+  expect(Number(face?.[1])).toBe(60 - KEY_H + 3.5)
+  expect(art.svg.indexOf('own-mascot') > art.svg.indexOf('rx="7.5"')).toBe(true)
+  // The pixel crew is gone.
+  expect(art.svg).not.toContain('calcMode="discrete"')
+})
+
+test('a mascot file in ~/.claude/starbridge takes the crew key; the key still opens the agents panel', async ($, on) => {
+  const w = world(on, { tokens: 120000, mascot: MASCOT })
+  await start($)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: band })
+  const art = (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === 'Agents panel')
+  expect(w.read.map(p => p.replace(/\//g, '\\'))).toContain(MASCOT_PATH)
+  expect(String(art?.props.source)).toContain('own-mascot')
+  expect(art?.props.height).toBe(60)
+  expect(art?.props.isInteractive).toBe(true)
+  const glow = (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === 'Agents panel glow')
+  expect(glow?.props.height).toBe(60)
+  // The click area is still the face alone.
+  const kids = ((await ui.find({ key: 'starbridge-crew-key' }))?.children ?? []) as Array<{ type?: string; props?: Record<string, unknown> }>
+  expect(kids.filter(k => k.props?.position !== 'absolute').map(k => [k.type, k.props?.height])).toEqual([['Svg', KEY_H]])
+  await click(ui as never, 'starbridge-crew')
+  expect(w.commands).toEqual(['agents-info'])
+  await ui.unmount()
 })
 
 test('the mascot is drawn bigger than its frame allows: standing it clears the sides, jumping it leaves the top', () => {

@@ -415,13 +415,43 @@ export const CREW_POSES: ReadonlyArray<Px[]> = [
  */
 const CREW_OY = 7
 
+/** A mascot of the person's own: an animated SVG nested over the agents key in place of the pixel crew. */
+export type Mascot = { svg: string; height: number }
+
+/** The tallest mascot the agents key takes, in CSS pixels: room to stand over the key and jump. */
+const MASCOT_MAX_H = 120
+/**
+ * The longest Svg source the engine draws. Over it, the engine refuses the whole band, not just the image,
+ * so a mascot file must leave room for the key drawn round it.
+ */
+export const SVG_MAX = 131072
+export const MASCOT_MAX = SVG_MAX - 2048
+
+/**
+ * Reads a mascot file: an `<svg>` root with a `height` from KEY_CANVAS_H to MASCOT_MAX_H, drawn on the
+ * agents key's 50px width with the key's face along its bottom KEY_H, and no longer than MASCOT_MAX.
+ * Anything else is refused (null).
+ */
+export function mascotOf(text: string): Mascot | null {
+  if (text.length > MASCOT_MAX) return null
+  const start = text.search(/<svg\b/)
+  if (start < 0) return null
+  const root = text.slice(start).match(/^<svg\b[^>]*>/)?.[0] ?? ''
+  const height = Number(root.match(/\sheight="([\d.]+)"/)?.[1])
+  if (!(height >= KEY_CANVAS_H && height <= MASCOT_MAX_H)) return null
+  return { svg: text.slice(start).trim(), height }
+}
+
 /**
  * The mascot key: its 12 poses swapped every 0.2s in a loop (SMIL, no script). The mascot is bigger than
  * the frame, on purpose: standing, its head and shoulders show over the rim, and it jumps clear of the
  * top into the headroom. Side to side it always keeps clear of the frame's edges.
+ *
+ * With a `mascot` of the person's own, that mascot is drawn over the face instead, and the image grows
+ * upward to the mascot's height; the face stays along the bottom, where the click area is.
  */
-export function crewKeySvg(k: { edge: string; bg: string; running?: number }): { svg: string; width: number } {
-  const h = KEY_CANVAS_H
+export function crewKeySvg(k: { edge: string; bg: string; running?: number; mascot?: Mascot | null }): { svg: string; width: number; height: number } {
+  const h = k.mascot ? k.mascot.height : KEY_CANVAS_H
   const cell = 3
   const w = 12 * cell + 2 * 4 + 6
   const ox = Math.round((w - 12 * cell) / 2)
@@ -429,23 +459,25 @@ export function crewKeySvg(k: { edge: string; bg: string; running?: number }): {
   const n = CREW_POSES.length
   const dur = (n * 0.2).toFixed(1)
   const keyTimes = Array.from({ length: n }, (_, i) => (i / n).toFixed(4)).join(';')
-  const frames = CREW_POSES.map((px, i) => {
+  const frames = k.mascot ? [k.mascot.svg] : CREW_POSES.map((px, i) => {
     const values = Array.from({ length: n }, (_, j) => (j === i ? 1 : 0)).join(';')
     const rects = px.map(([x, y, c]) => `<rect x="${ox + x * cell}" y="${oy + y * cell}" width="${cell}" height="${cell}" fill="${c}"/>`).join('')
     return `<g opacity="${i === 0 ? 1 : 0}"><animate attributeName="opacity" values="${values}" keyTimes="${keyTimes}" dur="${dur}s" calcMode="discrete" repeatCount="indefinite"/>${rects}</g>`
   })
-  const top = KEY_TOP
+  const top = h - KEY_H
   const badge = k.running && k.running > 0
     ? `<circle cx="${w - 8}" cy="${top + 8}" r="6" fill="#ff4d5e"/><text x="${w - 8}" y="${top + 11}" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff" font-family="${SANS}">${Math.min(9, k.running)}</text>`
     : ''
   return {
     svg: [
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`,
+      // Pixel art wants crisp edges; a mascot of the person's own is drawn smooth.
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"${k.mascot ? '' : ' shape-rendering="crispEdges"'}>`,
       `<rect x="3.5" y="${top + 3.5}" width="${w - 7}" height="${KEY_H - 7}" rx="7.5" fill="${k.bg}" stroke="${k.edge}" stroke-width="1.2" shape-rendering="auto"/>`,
       ...frames,
       badge,
       `</svg>`,
     ].join(''),
     width: w,
+    height: h,
   }
 }

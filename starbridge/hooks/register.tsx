@@ -12,10 +12,10 @@ import type { EngineInterface, Register, RenderNode } from 'claude-code'
 
 import type { SessionRun, View } from '../types'
 import {
-  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, glowSvg, GLOW_LIT, GLOW_REST, KEY_CANVAS_H, KEY_H, keySvg, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
+  blankSvg, crewKeySvg, DARK, extractResume, GAUGE_H, glowSvg, GLOW_LIT, GLOW_REST, KEY_H, keySvg, MASCOT_MAX, mascotOf, TILE_H, fmtDuration, fmtUsd, gaugeSvg, gaugeText, holdCardSvg, HOLD_MIN_TOKENS, isCold, isRunLive,
   LIGHT, PING_EVERY_MS, PING_PROMPT, pingUsd, priceOf, coldUsd, warmUsd, shortened, stripWidth, tilesSvg, TTL_MS,
 } from './logic'
-import type { Tile } from './logic'
+import type { Mascot, Tile } from './logic'
 
 /** Roughly the room the desktop leaves between two items of a row, in CSS pixels. */
 const ROW_GAP_PX = 14
@@ -52,6 +52,9 @@ let buttonStyle: 'custom' | 'flat' | 'native' = 'custom'
 let hovered: string | null = null
 const glowLevel: Record<string, number> = {}
 let glowTimer: { cancel: () => void } | null = null
+// A mascot of the person's own, read once at session start from ~/.claude/starbridge/mascot.svg. It lives
+// outside the plugin, so art the person may not share never ships with the package; absent, the pixel crew.
+let mascot: Mascot | null = null
 const GLOW_TICK_MS = 30
 const GLOW_IN_STEP = 0.2 // full in 150ms
 const GLOW_OUT_STEP = 0.125 // back to rest in 240ms
@@ -164,6 +167,21 @@ async function toggleWarm($: EngineInterface): Promise<void> {
 }
 
 // ---- Handover and end session ----------------------------------------------------------------
+
+/** Reads the person's own mascot, if there is one; a missing or unreadable file leaves the pixel crew. */
+async function readMascot($: EngineInterface): Promise<void> {
+  mascot = null
+  const home = (await $.env.get('USERPROFILE').catch(() => undefined)) ?? (await $.env.get('HOME').catch(() => undefined))
+  if (!home) return
+  const text = await $.fs.read(`${home}/.claude/starbridge/mascot.svg`).catch(() => null)
+  if (typeof text !== 'string') return
+  mascot = mascotOf(text)
+  if (!mascot) {
+    await $.ui.toast(text.length > MASCOT_MAX
+      ? `Starbridge: mascot.svg is ${Math.round(text.length / 1024)} KB, over the 128 KB the HUD can draw. Showing the pixel crew.`
+      : 'Starbridge: mascot.svg is not a usable SVG (50 wide, 42 to 120 tall). Showing the pixel crew.').catch(() => undefined)
+  }
+}
 
 /** The mascot key: opens the agents panel (Savvy Progress's /agents-info) to the front. */
 async function openCrew($: EngineInterface): Promise<void> {
@@ -340,13 +358,14 @@ export const register: Register = on => {
     const started = await next(e)
     await readTheme($)
     await readUsage($)
+    await readMascot($)
     // The model prices the warm and cold tiles from the first draw, before any reply has finished.
     const model = await $.session.model().catch(() => null)
     if (model) await update($, view, prev => ({ ...prev, model: prev.model ?? model }))
     await $.command.register({
       name: 'starbridge',
       description: 'Starbridge HUD: status, or warm on|off',
-      argumentHint: '[status | warm on | warm off | preview 64 warm hold | preview off | buttons custom|flat|native]',
+      argumentHint: '[status | warm on | warm off | mascot | preview 64 warm hold | preview off | buttons custom|flat|native]',
     })
     // Countdowns move once a minute; nothing else needs a clock.
     $.clock.every(60_000, () => {
@@ -466,6 +485,11 @@ export const register: Register = on => {
       $.ui.invalidate('ui.render')
       return { text: `Starbridge buttons: ${words[1]}` }
     }
+    if (words[0] === 'mascot') {
+      await readMascot($)
+      $.ui.invalidate('ui.render')
+      return { text: mascot ? `Mascot read from ~/.claude/starbridge/mascot.svg (${Math.round(mascot.svg.length / 1024)} KB).` : 'No usable mascot.svg: showing the pixel crew.' }
+    }
     if (words[0] === 'preview') {
       const rest = words.slice(1)
       if (rest.length === 0 || rest[0] === 'off') {
@@ -562,7 +586,7 @@ export const register: Register = on => {
         // jumping mascot) is a KEY_CANVAS_H image, and the pointer on it is on the key's Box, which does
         // nothing. The art never changes under the pointer, so an animated key never redraws and never
         // restarts: hover fades the glow layer alone (stepGlow). Keys never shrink: chips give way (stripOf).
-        const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17' })
+        const crewArt = crewKeySvg({ edge: '#d97757', bg: '#1f1a17', mascot })
         const crewCells = Math.ceil(crewArt.width / 8)
         const pressable = (o: { key: string; action: string; alt: string; art: { svg: string; width: number; height: number }; isInteractive: boolean; glow: string; hit: RenderNode }) => (
           <Box key={`${o.key}-key`} position="relative" flexShrink={0}>
@@ -581,7 +605,7 @@ export const register: Register = on => {
         const crewKey = flat ? (
           <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', glyph: '👾', label: 'Agents', ...KEY_QUIET, edge: undefined }} width={10} height={1} />
         ) : pressable({
-          key: 'starbridge-crew', action: 'crew', alt: 'Agents panel', art: { ...crewArt, height: KEY_CANVAS_H }, isInteractive: true, glow: '#d97757',
+          key: 'starbridge-crew', action: 'crew', alt: 'Agents panel', art: crewArt, isInteractive: true, glow: '#d97757',
           hit: <Client key="starbridge-crew" module="./deck-button.ts" props={{ key: 'starbridge-crew', action: 'crew', label: 'Agents', ...KEY_QUIET, ghost: true, cells: crewCells }} width="100%" height="100%" />,
         })
         // Keep warm draws a flame of its own, and is sized for its longer label so On and Off match.
